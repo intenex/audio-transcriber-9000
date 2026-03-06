@@ -462,10 +462,10 @@ struct TranscriptionView: View {
                 Image(systemName: "doc.text.magnifyingglass")
                     .font(.system(size: 40))
                     .foregroundStyle(.tertiary)
-                Text("Summarization requires Ollama")
+                Text("Summarization requires mlx-lm")
                     .font(.headline)
                     .foregroundStyle(.secondary)
-                Text("Install and start Ollama to generate summaries.")
+                Text("Install mlx-lm in the transcriber conda environment to generate summaries.")
                     .font(.subheadline)
                     .foregroundStyle(.tertiary)
             }
@@ -572,10 +572,15 @@ struct TranscriptionView: View {
     }
 
     private func transcribeRecording() async {
-        var mutable = recording
+        guard let idx = audioRecorder.recordings.firstIndex(where: { $0.id == recording.id }) else { return }
+        // Update status in the observable array immediately so processingView shows
+        // and both transcribe buttons become inaccessible before the async work starts.
+        audioRecorder.recordings[idx].status = .processing
+        var mutable = audioRecorder.recordings[idx]
         await transcriptionService.transcribe(recording: &mutable)
-        if let idx = audioRecorder.recordings.firstIndex(where: { $0.id == mutable.id }) {
-            audioRecorder.recordings[idx] = mutable
+        if let updatedIdx = audioRecorder.recordings.firstIndex(where: { $0.id == mutable.id }) {
+            audioRecorder.recordings[updatedIdx] = mutable
+            audioRecorder.saveRecordings()
         }
     }
 
