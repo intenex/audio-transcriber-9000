@@ -1,0 +1,51 @@
+name: AudioTranscriber9000
+options:
+  bundleIdPrefix: com.audiotranscriber9000
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "15.0"
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    PRODUCT_BUNDLE_IDENTIFIER: com.audiortranscriber.AudioTranscriber
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+
+targets:
+  AudioTranscriber9000:
+    type: application
+    platform: macOS
+    sources:
+      - AudioTranscriber
+    settings:
+      base:
+        PRODUCT_NAME: "Audio Transcriber 9000"
+        INFOPLIST_FILE: AudioTranscriber/Info.plist
+        CODE_SIGN_ENTITLEMENTS: AudioTranscriber/AudioTranscriber.entitlements
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_IDENTITY: "-"
+        SWIFT_EMIT_LOC_STRINGS: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    info:
+      path: AudioTranscriber/Info.plist
+      properties:
+        NSMicrophoneUsageDescription: "Audio Transcriber 9000 needs microphone access to record audio for transcription."
+        NSPrincipalClass: NSApplication
+        CFBundleDisplayName: "Audio Transcriber 9000"
+
+  AudioTranscriberTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests/AudioTranscriberTests
+    dependencies:
+      - target: AudioTranscriber9000
+    settings:
+      base:
+        PRODUCT_NAME: AudioTranscriberTests
+        INFOPLIST_FILE: ""
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Audio Transcriber 9000.app/Contents/MacOS/Audio Transcriber 9000"

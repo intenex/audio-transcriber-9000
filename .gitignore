@@ -1,0 +1,42 @@
+# Xcode
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+build/
+*.ipa
+*.dSYM.zip
+*.dSYM
+*.profraw
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+.env
+.venv
+
+# Conda (don't commit the env itself, only the spec files)
+# environment.yml and requirements.txt ARE committed
+
+# Xcode old project (replaced by AudioTranscriber9000.xcodeproj via XcodeGen)
+AudioTranscriber.xcodeproj/
+
+# Secrets
+*.token
+.secrets
+
+# Editor
+.idea/
+*.swp
+*.swo

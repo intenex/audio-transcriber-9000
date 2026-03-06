@@ -1,0 +1,8 @@
+whisperx
+pyannote.audio
+torch
+torchaudio
+scipy
+soundfile
+mlx-lm
+pytest

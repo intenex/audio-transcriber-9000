@@ -1,0 +1,16 @@
+name: transcriber
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+    - whisperx
+    - pyannote.audio
+    - torch
+    - torchaudio
+    - scipy
+    - soundfile
+    - mlx-lm
+    - pytest
