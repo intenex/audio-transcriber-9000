@@ -87,39 +87,14 @@ final class AudioRecorder: NSObject {
                 let inputFormat = inputNode.outputFormat(forBus: 0)
                 NSLog("[AudioRecorder] Input format: \(inputFormat)")
 
-                guard let outputFormat = AVAudioFormat(
-                    commonFormat: .pcmFormatInt16,
-                    sampleRate: 16000,
-                    channels: 1,
-                    interleaved: true
-                ) else {
-                    throw NSError(domain: "AudioRecorder", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to create output format"])
-                }
-
-                let file = try AVAudioFile(forWriting: url, settings: outputFormat.settings)
-
-                guard let converter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
-                    throw NSError(domain: "AudioRecorder", code: 2, userInfo: [NSLocalizedDescriptionKey: "Failed to create audio converter"])
-                }
+                // Write in the native input format — whisperX resamples automatically.
+                // Using a custom format with AVAudioConverter + AVAudioFile causes internal
+                // CoreAudio assertion failures (ExtAudioFile::WriteInputProc) when the
+                // buffer format doesn't match the file's processingFormat.
+                let file = try AVAudioFile(forWriting: url, settings: inputFormat.settings)
 
                 inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
-                    let frameCount = AVAudioFrameCount(
-                        Double(buffer.frameLength) * outputFormat.sampleRate / inputFormat.sampleRate
-                    )
-                    guard let convertedBuffer = AVAudioPCMBuffer(
-                        pcmFormat: outputFormat,
-                        frameCapacity: frameCount
-                    ) else { return }
-
-                    var error: NSError?
-                    converter.convert(to: convertedBuffer, error: &error) { _, outStatus in
-                        outStatus.pointee = .haveData
-                        return buffer
-                    }
-
-                    if error == nil {
-                        try? file.write(from: convertedBuffer)
-                    }
+                    try? file.write(from: buffer)
                 }
 
                 engine.prepare()
