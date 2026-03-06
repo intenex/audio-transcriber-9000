@@ -23,7 +23,7 @@ A native macOS app for recording audio, transcribing speech to text with speaker
 ## Requirements
 
 - **macOS 14.0 (Sonoma)** or later
-- **Apple Silicon Mac** (M1/M2/M3) — required for the mlx-lm AI features
+- **Apple Silicon Mac** (M1+) — required for the mlx-lm AI features
 - **Miniconda** — manages the Python environment
 - **Xcode** — to build the app from source
 - **[XcodeGen](https://github.com/yonaskolb/XcodeGen)** — to generate the `.xcodeproj` (setup.sh installs this)
