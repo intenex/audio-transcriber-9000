@@ -1,10 +1,30 @@
 import Foundation
 
+struct TranscriptionWord: Codable {
+    let word: String
+    let start: Double?
+    let end: Double?
+}
+
 struct TranscriptionSegment: Codable {
     let start: TimeInterval
     let end: TimeInterval
     let text: String
     let speaker: String
+    let words: [TranscriptionWord]
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        start = try c.decode(TimeInterval.self, forKey: .start)
+        end = try c.decode(TimeInterval.self, forKey: .end)
+        text = try c.decode(String.self, forKey: .text)
+        speaker = try c.decode(String.self, forKey: .speaker)
+        words = (try? c.decode([TranscriptionWord].self, forKey: .words)) ?? []
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case start, end, text, speaker, words
+    }
 }
 
 struct TranscriptionResult: Codable {

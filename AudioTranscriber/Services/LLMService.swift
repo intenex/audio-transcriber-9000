@@ -130,7 +130,7 @@ final class LLMService {
             "python", scriptPath,
             "--messages", messagesJSON,
             "--model", selectedModel,
-            "--max-tokens", "2000",
+            "--max-tokens", "800",
         ]
         if let system {
             args.append(contentsOf: ["--system", system])

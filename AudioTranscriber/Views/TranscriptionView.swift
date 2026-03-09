@@ -14,6 +14,7 @@ struct TranscriptionView: View {
     @Environment(LLMService.self) private var llmService
 
     @State private var markdownContent: String? = nil
+    @State private var segments: [TranscriptionSegment]? = nil
     @State private var isLoading = false
     @State private var showingDeleteConfirm = false
     @State private var showCopiedToast = false
@@ -56,7 +57,9 @@ struct TranscriptionView: View {
                 case .done:
                     switch selectedTab {
                     case .transcript:
-                        if let content = markdownContent {
+                        if let segs = segments, !segs.isEmpty {
+                            interactiveTranscriptContent(segs)
+                        } else if let content = markdownContent {
                             transcriptTabContent(content)
                         } else {
                             ProgressView("Loading transcript...")
@@ -325,6 +328,17 @@ struct TranscriptionView: View {
         }
     }
 
+    private func interactiveTranscriptContent(_ segs: [TranscriptionSegment]) -> some View {
+        InteractiveTranscriptView(
+            segments: segs,
+            currentTime: audioRecorder.playbackTime,
+            isPlaying: isPlayingThis,
+            onSeek: { time in
+                audioRecorder.seekAndPlay(to: time, recording: recording)
+            }
+        )
+    }
+
     private func transcriptTabContent(_ content: String) -> some View {
         VStack(spacing: 0) {
             // In-transcript search bar
@@ -496,10 +510,16 @@ struct TranscriptionView: View {
             return
         }
         isLoading = true
+        let segmentsURL = recording.fileURL.deletingPathExtension().appendingPathExtension("segments.json")
         DispatchQueue.global(qos: .userInitiated).async {
             let content = try? String(contentsOf: url, encoding: .utf8)
+            let segs: [TranscriptionSegment]? = {
+                guard let data = try? Data(contentsOf: segmentsURL) else { return nil }
+                return try? JSONDecoder().decode([TranscriptionSegment].self, from: data)
+            }()
             DispatchQueue.main.async {
                 markdownContent = content
+                segments = segs
                 isLoading = false
             }
         }

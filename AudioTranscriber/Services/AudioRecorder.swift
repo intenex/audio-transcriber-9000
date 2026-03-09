@@ -10,6 +10,7 @@ final class AudioRecorder: NSObject {
     var isPlaying = false
     var playingRecordingID: UUID? = nil
     var recordingDuration: TimeInterval = 0
+    var playbackTime: Double = 0.0
     var recordings: [Recording] = []
     var errorMessage: String? = nil
 
@@ -18,6 +19,7 @@ final class AudioRecorder: NSObject {
     private var audioFile: AVAudioFile?
     private var audioPlayer: AVAudioPlayer?
     private var timer: Timer?
+    private var playbackTimer: Timer?
     private var currentRecordingURL: URL?
     private var recordingStartDate: Date?
 
@@ -155,6 +157,28 @@ final class AudioRecorder: NSObject {
             audioPlayer?.play()
             isPlaying = true
             playingRecordingID = recording.id
+            startPlaybackTimer()
+        } catch {
+            errorMessage = "Failed to play recording: \(error.localizedDescription)"
+        }
+    }
+
+    func seekAndPlay(to time: TimeInterval, recording: Recording) {
+        if isPlaying, playingRecordingID == recording.id, let player = audioPlayer {
+            player.currentTime = time
+            playbackTime = time
+            return
+        }
+        stopPlayback()
+        do {
+            audioPlayer = try AVAudioPlayer(contentsOf: recording.fileURL)
+            audioPlayer?.delegate = self
+            audioPlayer?.currentTime = time
+            audioPlayer?.play()
+            isPlaying = true
+            playingRecordingID = recording.id
+            playbackTime = time
+            startPlaybackTimer()
         } catch {
             errorMessage = "Failed to play recording: \(error.localizedDescription)"
         }
@@ -165,6 +189,8 @@ final class AudioRecorder: NSObject {
         audioPlayer = nil
         isPlaying = false
         playingRecordingID = nil
+        stopPlaybackTimer()
+        playbackTime = 0.0
     }
 
     func deleteRecording(_ recording: Recording) {
@@ -172,11 +198,13 @@ final class AudioRecorder: NSObject {
         if let markdownURL = recording.transcriptionURL {
             try? FileManager.default.removeItem(at: markdownURL)
         }
-        // Delete sidecar files (summary, chat)
+        // Delete sidecar files (summary, chat, segments)
         let summaryURL = recording.fileURL.deletingPathExtension().appendingPathExtension("summary.json")
         let chatURL = recording.fileURL.deletingPathExtension().appendingPathExtension("chat.json")
+        let segmentsURL = recording.fileURL.deletingPathExtension().appendingPathExtension("segments.json")
         try? FileManager.default.removeItem(at: summaryURL)
         try? FileManager.default.removeItem(at: chatURL)
+        try? FileManager.default.removeItem(at: segmentsURL)
 
         recordings.removeAll { $0.id == recording.id }
         saveRecordings()
@@ -239,6 +267,19 @@ final class AudioRecorder: NSObject {
         timer = nil
     }
 
+    private func startPlaybackTimer() {
+        stopPlaybackTimer()
+        playbackTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            guard let self, let player = self.audioPlayer, player.isPlaying else { return }
+            self.playbackTime = player.currentTime
+        }
+    }
+
+    private func stopPlaybackTimer() {
+        playbackTimer?.invalidate()
+        playbackTimer = nil
+    }
+
     private func dateString() -> String {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd_HH-mm-ss"
@@ -277,6 +318,8 @@ extension AudioRecorder: AVAudioPlayerDelegate {
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         isPlaying = false
         playingRecordingID = nil
+        stopPlaybackTimer()
+        playbackTime = 0.0
     }
 }
 

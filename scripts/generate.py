@@ -60,17 +60,47 @@ def main():
                 tokenize=False,
                 add_generation_prompt=True
             )
-        except Exception:
-            # Fallback if chat template fails
+        except Exception as e:
+            print(f'Warning: chat template failed ({e}), using fallback format', file=sys.stderr)
             prompt = _format_messages_fallback(messages)
     else:
         prompt = _format_messages_fallback(messages)
 
+    # Stop sequences: prevent model from roleplaying further conversation turns
+    stop_sequences = ['\nUser:', '\nHuman:', '\n[INST]', '\nUSER:', '\nHUMAN:',
+                      '\n<|im_start|>user', '\n<|user|>', '\n\nUser:', '\n\nHuman:']
+    tail_len = max(len(s) for s in stop_sequences)
+
     try:
+        buffer = ''
+        stopped = False
         for response in stream_generate(model, tokenizer, prompt=prompt, max_tokens=args.max_tokens):
             text = response.text if hasattr(response, 'text') else str(response)
-            sys.stdout.write(text)
+            buffer += text
+
+            # Check if any stop sequence appeared in the buffer
+            stop_idx = None
+            for seq in stop_sequences:
+                idx = buffer.find(seq)
+                if idx != -1 and (stop_idx is None or idx < stop_idx):
+                    stop_idx = idx
+
+            if stop_idx is not None:
+                sys.stdout.write(buffer[:stop_idx])
+                sys.stdout.flush()
+                stopped = True
+                break
+
+            # Flush safe portion (keep tail in buffer for partial stop seq detection)
+            if len(buffer) > tail_len:
+                sys.stdout.write(buffer[:-tail_len])
+                sys.stdout.flush()
+                buffer = buffer[-tail_len:]
+
+        if not stopped:
+            sys.stdout.write(buffer)
             sys.stdout.flush()
+
     except Exception as e:
         print(f'\nGeneration error: {e}', file=sys.stderr)
         sys.exit(1)
@@ -83,14 +113,13 @@ def _format_messages_fallback(messages):
         role = m.get('role', 'user')
         content = m.get('content', '')
         if role == 'system':
-            parts.append(f'System: {content}')
+            parts.append(f'<s>[INST] <<SYS>>\n{content}\n<</SYS>>\n\n')
         elif role == 'user':
-            parts.append(f'User: {content}')
+            parts.append(f'[INST] {content} [/INST]')
         elif role == 'assistant':
-            parts.append(f'Assistant: {content}')
-        else:
-            parts.append(f'{role}: {content}')
-    return '\n'.join(parts) + '\nAssistant: '
+            parts.append(f' {content} </s>')
+    # End with opening for assistant response
+    return ''.join(parts)
 
 
 if __name__ == '__main__':

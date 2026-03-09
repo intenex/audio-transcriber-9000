@@ -114,11 +114,26 @@ def transcribe(audio_file: str, hf_token: str, model_name: str = "large-v3", lan
     for seg in result.get("segments", []):
         speaker = seg.get("speaker", "SPEAKER_00")
         speakers.add(speaker)
+
+        # Include word-level timestamps when available (from whisperX alignment step)
+        words_out = []
+        for w in seg.get("words", []):
+            if not isinstance(w, dict) or "word" not in w:
+                continue
+            ws = w.get("start")
+            we = w.get("end")
+            words_out.append({
+                "word": w.get("word", ""),
+                "start": round(float(ws), 3) if ws is not None else None,
+                "end": round(float(we), 3) if we is not None else None,
+            })
+
         segments.append({
             "start": round(seg.get("start", 0.0), 3),
             "end": round(seg.get("end", 0.0), 3),
             "text": seg.get("text", "").strip(),
             "speaker": speaker,
+            "words": words_out,
         })
 
     elapsed = time.time() - start_time

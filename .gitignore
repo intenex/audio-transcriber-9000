@@ -36,6 +36,13 @@ AudioTranscriber.xcodeproj/
 *.token
 .secrets
 
+# Claude Code
+.claude/
+
+# BMAD
+_bmad/
+_bmad-output/
+
 # Editor
 .idea/
 *.swp

@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		0250F5E3AEB6C0DCF826B6C0 /* SummarizationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BFBA6DEA7C8C499A9C6AB0F /* SummarizationService.swift */; };
 		06EB9732338CD7FD4BF8AF59 /* Summary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46C7BE2F4857B3BCFB56354E /* Summary.swift */; };
+		2DDCD292CB39D57AE9BAA58D /* InteractiveTranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5412D6EEB8C6D14CFFD769 /* InteractiveTranscriptView.swift */; };
 		34DAA991765E97AF97FFBAA5 /* AudioRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87AD1C57AAB5B6F7994EACC6 /* AudioRecorder.swift */; };
 		3888DEFBF1DCC75C29F35CBA /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D9A01C65698F82010F003D69 /* Assets.xcassets */; };
 		38F8158F1A2D54E1A54CC0C0 /* TranscriptionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1177F7F5B9E279111EA064A /* TranscriptionView.swift */; };
@@ -58,6 +59,7 @@
 		905C14B77E8D44EF1E55E5BD /* LLMService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMService.swift; sourceTree = "<group>"; };
 		9BFBA6DEA7C8C499A9C6AB0F /* SummarizationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummarizationService.swift; sourceTree = "<group>"; };
 		A78FA8273D7B03F525B25009 /* AudioTranscriber9000.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AudioTranscriber9000.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA5412D6EEB8C6D14CFFD769 /* InteractiveTranscriptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractiveTranscriptView.swift; sourceTree = "<group>"; };
 		B3288B9D5EDC565361A92583 /* GlobalChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalChatView.swift; sourceTree = "<group>"; };
 		BA6DA867DDA9D48B2591C530 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		C9577C6CBEC3C32D16F1AF8D /* AudioTranscriberApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioTranscriberApp.swift; sourceTree = "<group>"; };
@@ -112,6 +114,7 @@
 			children = (
 				3C1E10A4E28EDE13500BA24F /* ChatView.swift */,
 				B3288B9D5EDC565361A92583 /* GlobalChatView.swift */,
+				AA5412D6EEB8C6D14CFFD769 /* InteractiveTranscriptView.swift */,
 				0281B385EF4A206CBD41EBFC /* RecordingControlView.swift */,
 				21904758495DEB11019A2452 /* RecordingListView.swift */,
 				D598658469171EF291DDD93B /* SettingsView.swift */,
@@ -257,6 +260,7 @@
 				4F4BA4BF68B0E2D0445A31C1 /* ChatView.swift in Sources */,
 				C81C58D101A7EB33FE5C3A42 /* ContentView.swift in Sources */,
 				A26165E8DA82FDEC247CD4B6 /* GlobalChatView.swift in Sources */,
+				2DDCD292CB39D57AE9BAA58D /* InteractiveTranscriptView.swift in Sources */,
 				D0E8FB35F23A7A0DC74D0E00 /* LLMService.swift in Sources */,
 				F99167452B955AC5F923D37E /* Recording.swift in Sources */,
 				D5C33B88A15C72B5F78205A7 /* RecordingControlView.swift in Sources */,

@@ -40,6 +40,12 @@ final class TranscriptionService {
             let markdown = MarkdownFormatter.format(result: result, recording: recording)
             try markdown.write(to: markdownURL, atomically: true, encoding: .utf8)
 
+            // Save word-level segment data for interactive playback
+            let segmentsURL = recording.fileURL.deletingPathExtension().appendingPathExtension("segments.json")
+            if let segData = try? JSONEncoder().encode(result.segments) {
+                try? segData.write(to: segmentsURL)
+            }
+
             await MainActor.run {
                 recording.transcriptionURL = markdownURL
                 recording.status = .done
