@@ -1,4 +1,3 @@
-import AppKit
 import AVFoundation
 import Foundation
 import Observation
@@ -354,10 +353,6 @@ final class RecordingStore {
         save()
     }
 
-    func showInFinder(_ recording: Recording) {
-        NSWorkspace.shared.activateFileViewerSelecting([recording.fileURL])
-    }
-
     // MARK: - Categories
 
     func addCategory(_ name: String) {
@@ -399,27 +394,40 @@ final class RecordingStore {
     /// formats like mp3/m4a are always copied as-is).
     static let compressibleExtensions: Set<String> = ["wav", "aiff", "aif", "caf", "flac"]
 
-    func importAudioFiles() {
-        let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = true
-        panel.canChooseDirectories = false
-        panel.allowedContentTypes = [.audio, .wav, .mp3, .mpeg4Audio, .aiff]
-        panel.message = "Select audio files to import for transcription"
+    enum ImportCompressionPolicy { case always, never, ask }
 
-        guard panel.runModal() == .OK else { return }
-        let urls = panel.urls
+    /// Settings-driven policy for compress-on-import (the platform view layer
+    /// decides how to "ask" — NSAlert on Mac, confirmationDialog on iOS).
+    func resolveImportCompressionPolicy() -> ImportCompressionPolicy {
+        switch defaults.string(forKey: "importCompression") {
+        case "always": return .always
+        case "never": return .never
+        default: return .ask
+        }
+    }
 
+    /// Size math for the compress-on-import prompt (pure; shared by both
+    /// platforms' UIs).
+    func importCompressionEstimate(for urls: [URL]) -> (originalBytes: Int64, compressedBytes: Int64, compressibleCount: Int) {
         let compressibles = urls.filter {
             Self.compressibleExtensions.contains($0.pathExtension.lowercased())
         }
-        let shouldCompress = compressibles.isEmpty ? false : askImportCompression(for: compressibles)
+        let originalBytes = compressibles.reduce(Int64(0)) { $0 + Self.fileSize(of: $1) }
+        let totalSeconds = compressibles.reduce(0.0) { $0 + Self.audioDuration(for: $1) }
+        let compressedBytes = Int64(AudioCompressor.Spec.storage.estimatedBytes(forSeconds: totalSeconds))
+        return (originalBytes, compressedBytes, compressibles.count)
+    }
 
+    /// Platform-neutral import. `compress` applies only to compressible
+    /// sources; already-compressed formats are always copied as-is.
+    @discardableResult
+    func importAudioFiles(urls: [URL], compress: Bool) -> Task<Void, Never> {
         Task { [weak self] in
             guard let self else { return }
             for sourceURL in urls {
-                let compress = shouldCompress
+                let doCompress = compress
                     && Self.compressibleExtensions.contains(sourceURL.pathExtension.lowercased())
-                await self.importOne(sourceURL, compress: compress)
+                await self.importOne(sourceURL, compress: doCompress)
             }
         }
     }
@@ -449,34 +457,6 @@ final class RecordingStore {
         } catch {
             errorMessage = "Failed to import \(sourceURL.lastPathComponent): \(error.localizedDescription)"
         }
-    }
-
-    /// Resolve the import-compression choice: settings can force always/never,
-    /// default is to ask per batch with an estimated size comparison.
-    private func askImportCompression(for files: [URL]) -> Bool {
-        switch defaults.string(forKey: "importCompression") {
-        case "always": return true
-        case "never": return false
-        default: break
-        }
-
-        let originalBytes = files.reduce(Int64(0)) { total, url in
-            let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
-            return total + ((attrs?[.size] as? NSNumber)?.int64Value ?? 0)
-        }
-        let totalSeconds = files.reduce(0.0) { $0 + Self.audioDuration(for: $1) }
-        let compressedBytes = Int64(AudioCompressor.Spec.storage.estimatedBytes(forSeconds: totalSeconds))
-
-        let alert = NSAlert()
-        alert.messageText = "Compress imported audio?"
-        alert.informativeText = """
-        \(files.count) file\(files.count == 1 ? "" : "s") can be converted to high-quality AAC:
-        \(ByteCountFormatter.string(fromByteCount: originalBytes, countStyle: .file)) → ~\(ByteCountFormatter.string(fromByteCount: compressedBytes, countStyle: .file)).
-        Quality remains excellent for listening and transcription. Originals are not modified.
-        """
-        alert.addButton(withTitle: "Compress")
-        alert.addButton(withTitle: "Keep Original Format")
-        return alert.runModal() == .alertFirstButtonReturn
     }
 
     // MARK: - Compress in place
