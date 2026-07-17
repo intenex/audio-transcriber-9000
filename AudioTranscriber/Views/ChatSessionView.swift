@@ -359,7 +359,7 @@ struct ChatSessionView: View {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .prettyPrinted
         if let data = try? encoder.encode(history) {
-            try? data.write(to: chatFileURL)
+            try? AtomicFile.write(data, to: chatFileURL)
         }
     }
 }

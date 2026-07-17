@@ -57,7 +57,7 @@ struct SummarizationService {
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = .prettyPrinted
         if let data = try? encoder.encode(summary) {
-            try? data.write(to: url)
+            try? AtomicFile.write(data, to: url)
         }
     }
 

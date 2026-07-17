@@ -214,9 +214,9 @@ final class TranscriptionService {
         // Write sidecars in the existing formats.
         let markdown = MarkdownFormatter.format(result: output.result, recording: recording,
                                                 engineAttribution: engine.modelDescription)
-        try markdown.write(to: recording.markdownURL, atomically: true, encoding: .utf8)
+        try AtomicFile.write(markdown, to: recording.markdownURL)
         if let segmentData = try? JSONEncoder().encode(output.result.segments) {
-            try? segmentData.write(to: recording.segmentsURL)
+            try? AtomicFile.write(segmentData, to: recording.segmentsURL)
         }
 
         // Merge auto-identified speaker names, never overwriting user-set names.
@@ -227,7 +227,7 @@ final class TranscriptionService {
                 names[id] = name
             }
             if let data = try? JSONEncoder().encode(names) {
-                try? data.write(to: recording.speakersURL)
+                try? AtomicFile.write(data, to: recording.speakersURL)
             }
         }
 

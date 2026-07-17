@@ -137,6 +137,16 @@ final class KeychainStoreTests: XCTestCase {
         XCTAssertTrue(store.has(.openAI))
     }
 
+    func testAtomicFileRoundTripAndOverwrite() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("atomic-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try AtomicFile.write(Data("first".utf8), to: url)
+        XCTAssertEqual(try AtomicFile.read(url), Data("first".utf8))
+        try AtomicFile.write("second", to: url)
+        XCTAssertEqual(String(data: try AtomicFile.read(url), encoding: .utf8), "second")
+    }
+
     func testInMemoryStore() {
         let mem = InMemorySecretsStore()
         mem.set("abc", for: .openAI)

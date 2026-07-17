@@ -70,7 +70,7 @@ final class SpeakerLibraryStore {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         if let data = try? encoder.encode(library) {
-            try? data.write(to: libraryURL, options: .atomic)
+            try? AtomicFile.write(data, to: libraryURL)
         }
     }
 
@@ -196,7 +196,7 @@ final class SpeakerLibraryStore {
 
         if changed {
             if let data = try? JSONEncoder().encode(names) {
-                try? data.write(to: recording.speakersURL)
+                try? AtomicFile.write(data, to: recording.speakersURL)
             }
             save()
         }

@@ -33,6 +33,7 @@
 		3C731A7ABDCA8EA529B48737 /* RTFCalibration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 980E591FF520483287042BDE /* RTFCalibration.swift */; };
 		415F49E4A23F933AB4479835 /* AudioRecorderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC18FC9736BBC70FE65C7EAA /* AudioRecorderTests.swift */; };
 		4F3479068146E26BD1E53CEC /* ChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46FF6FEF5D62CAF672578C81 /* ChatMessage.swift */; };
+		5482CCF201E286203F1AC65E /* AtomicFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 883B8BB3E5925A59BB387380 /* AtomicFile.swift */; };
 		59560E5F266DF5FD45593C64 /* AudioCompressor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64E0DC896410E1655A2D23C9 /* AudioCompressor.swift */; };
 		5B091761C2C7B5673608688E /* TranscriptionQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B54540EA072184CC5CE16F09 /* TranscriptionQueueTests.swift */; };
 		66522B44C8C4CD1EE0109E57 /* SpeakerAssigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BC943CD9DCB50839335C865 /* SpeakerAssigner.swift */; };
@@ -133,6 +134,7 @@
 		83FC8A65191A20F31BA16125 /* SpeakerLibraryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerLibraryTests.swift; sourceTree = "<group>"; };
 		863404946DAADD38D657F4F5 /* SSEParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSEParser.swift; sourceTree = "<group>"; };
 		87AD1C57AAB5B6F7994EACC6 /* AudioRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorder.swift; sourceTree = "<group>"; };
+		883B8BB3E5925A59BB387380 /* AtomicFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AtomicFile.swift; sourceTree = "<group>"; };
 		88D2BFB3E06E56948A2CFF62 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		8B5D5CC3AEDB4489D0A90CD5 /* OpenAICompatibleChatProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAICompatibleChatProvider.swift; sourceTree = "<group>"; };
 		8B8A2EB8AB4A57B6FDD77811 /* ReferenceClipExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReferenceClipExtractor.swift; sourceTree = "<group>"; };
@@ -310,6 +312,7 @@
 		C793AC69B1EC13036BE38295 /* Shared */ = {
 			isa = PBXGroup;
 			children = (
+				883B8BB3E5925A59BB387380 /* AtomicFile.swift */,
 				9761CB4AA52DE14E2371BEAD /* CondaEnvironment.swift */,
 				11BE300E8FBCBFACF451B67C /* KeychainStore.swift */,
 				F0AEF0436FAA8EB4E7CDB62C /* MultipartFormData.swift */,
@@ -473,6 +476,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				0A7EC8163C971771BAB54E80 /* AssemblyAITranscriptionEngine.swift in Sources */,
+				5482CCF201E286203F1AC65E /* AtomicFile.swift in Sources */,
 				59560E5F266DF5FD45593C64 /* AudioCompressor.swift in Sources */,
 				34DAA991765E97AF97FFBAA5 /* AudioRecorder.swift in Sources */,
 				C94D25EDF600B61DE9551DE4 /* AudioSplitPlanner.swift in Sources */,

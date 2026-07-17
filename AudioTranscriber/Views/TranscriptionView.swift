@@ -1100,7 +1100,7 @@ struct TranscriptionView: View {
         if speakerNames.isEmpty {
             try? FileManager.default.removeItem(at: speakerNamesURL)
         } else if let data = try? encoder.encode(speakerNames) {
-            try? data.write(to: speakerNamesURL)
+            try? AtomicFile.write(data, to: speakerNamesURL)
         }
     }
 
