@@ -4,7 +4,7 @@ What exists, how to run it, and what "verified" means in this project. See [DEVE
 
 ## Test suites (Tests/AudioTranscriberTests/, `@testable import AudioTranscriber`)
 
-**Unit — always run, no network, no models (177 tests as of 2026-07-17):**
+**Unit — always run, no network, no models (187 tests as of 2026-07-17):**
 
 | Suite | Covers |
 |---|---|
@@ -14,6 +14,8 @@ What exists, how to run it, and what "verified" means in this project. See [DEVE
 | `RecordingMetaTests` | `.meta.json` sidecar: written on insert/change (no-op updates leave the file byte-identical), **library reconstructs from the directory alone with stable UUIDs/names/categories** after deleting recordings.json, external (synced-in) meta edits win on reload, legacy-library backfill, delete cleanup |
 | `CheckpointRelocationTests` | checkpoint path is ID-keyed under Application Support (never inside the library), legacy `<stem>.partial.json` migrates at load and launch repair sees it, delete cleans the relocated file. Tests that write real checkpoints must clean up (the location is global) |
 | `SpoolTests` | finalize moves a spool file into the library; launch sweep salvages crash leftovers (>4 KB) and deletes stubs; the sweep never touches `store.activeRecordingURL` (the live recording) |
+| `ImportURLsTests` | platform-neutral import API: copy vs compress-to-m4a, compress flag ignored for already-compressed sources, always/never/ask policy resolution, estimate counts only compressibles |
+| `TranscriptTextBuilderTests` | shared transcript renderer: word ranges map back to exact text, same-speaker grouping under one header, interpolation fallback without word timings, case-insensitive search ranges, range-at-time + tap-to-seek lookup |
 | `TranscriptionQueueTests` | queue semantics with `MockTranscriptionEngine`: serial order, dedupe, pause keeps checkpoint → `.paused`, cancel deletes → `.pending`, failure → `.failed`, sidecar bytes written |
 | `ChatProviderTests` / `ChatServiceSelectionTests` | SSE token streaming, system-prompt prepend, MiniMax `reasoning_content` + `base_resp` error on HTTP 200, 401/missing-key paths, undecodable-chunk tolerance; provider auto-selection (MiniMax→OpenAI→local, explicit wins) |
 | `CloudEngineTests` | AudioSplitPlanner (25 MB math vs the real 4 h 56 m duration), PartMerger (offsets, canonical minting, enrolled-name propagation, S-token continuity), diarized_json + AssemblyAI response parsing, cost estimator, **mocked AssemblyAI end-to-end flow with real audio compression** |
