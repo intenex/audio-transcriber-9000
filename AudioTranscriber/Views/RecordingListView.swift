@@ -9,6 +9,19 @@ struct RecordingListView: View {
     @State private var searchQuery = ""
     @State private var renamingRecordingID: UUID? = nil
     @State private var renameText = ""
+    @State private var collapsedCategories: Set<String> =
+        Set(UserDefaults.standard.stringArray(forKey: "collapsedCategories") ?? [])
+    @State private var newCategorySheet: NewCategoryTarget? = nil
+    @State private var renamingCategory: String? = nil
+
+    /// Sheet payload: the recording to move into the newly created category
+    /// (nil id = just create).
+    struct NewCategoryTarget: Identifiable {
+        let id = UUID()
+        let recordingID: UUID?
+    }
+
+    private static let uncategorizedKey = "__uncategorized__"
 
     private var filteredRecordings: [Recording] {
         guard !searchQuery.isEmpty else { return store.recordings }
@@ -22,6 +35,10 @@ struct RecordingListView: View {
         }
     }
 
+    private func recordings(in category: String?) -> [Recording] {
+        store.recordings.filter { $0.category == category }
+    }
+
     var body: some View {
         List(selection: $selectedRecordingID) {
             Section {
@@ -33,84 +50,68 @@ struct RecordingListView: View {
                 GlobalChatRow(showGlobalChat: $showGlobalChat, selectedRecordingID: $selectedRecordingID)
             }
 
-            Section {
-                if filteredRecordings.isEmpty {
-                    VStack(spacing: 8) {
-                        Image(systemName: searchQuery.isEmpty ? "waveform.slash" : "magnifyingglass")
-                            .font(.title2)
-                            .foregroundStyle(.quaternary)
-                        Text(searchQuery.isEmpty ? "No recordings yet" : "No matches")
-                            .font(.subheadline)
-                            .foregroundStyle(.tertiary)
+            if !searchQuery.isEmpty {
+                // Search: flat results across all categories (existing behavior)
+                Section {
+                    if filteredRecordings.isEmpty {
+                        emptyPlaceholder
+                    } else {
+                        recordingRows(filteredRecordings)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                } else {
-                    ForEach(filteredRecordings) { recording in
-                        RecordingRow(recording: recording)
-                            .tag(recording.id)
-                            .contextMenu {
-                                Button {
-                                    audioRecorder.playRecording(recording)
-                                } label: {
-                                    Label("Play", systemImage: "play.fill")
-                                }
-
-                                Menu {
-                                    Button("On-Device (Local)") {
-                                        transcriptionService.enqueue(recording.id, using: .local)
-                                    }
-                                    Button("OpenAI") {
-                                        transcriptionService.enqueue(recording.id, using: .openAI)
-                                    }
-                                    .disabled(!KeychainStore.shared.has(.openAI))
-                                    Button("AssemblyAI") {
-                                        transcriptionService.enqueue(recording.id, using: .assemblyAI)
-                                    }
-                                    .disabled(!KeychainStore.shared.has(.assemblyAI))
-                                } label: {
-                                    Label(recording.status.isResumable ? "Resume Transcription" : "Transcribe",
-                                          systemImage: "waveform.badge.mic")
-                                }
-                                .disabled(!recording.status.canStartTranscription)
-
-                                Button {
-                                    renamingRecordingID = recording.id
-                                    renameText = recording.name ?? ""
-                                } label: {
-                                    Label("Rename", systemImage: "pencil")
-                                }
-
-                                Button {
-                                    store.showInFinder(recording)
-                                } label: {
-                                    Label("Show in Finder", systemImage: "folder")
-                                }
-
-                                Divider()
-
-                                Button(role: .destructive) {
-                                    if selectedRecordingID == recording.id {
-                                        selectedRecordingID = nil
-                                    }
-                                    if audioRecorder.playingRecordingID == recording.id {
-                                        audioRecorder.stopPlayback()
-                                    }
-                                    store.delete(recording)
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
+                } header: {
+                    HStack {
+                        Text("Results")
+                        Spacer()
+                        Text("\(filteredRecordings.count)")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.tertiary)
+                            .monospacedDigit()
                     }
                 }
-            } header: {
-                HStack {
-                    Text("Recordings")
-                    Spacer()
-                    Text("\(filteredRecordings.count)")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.tertiary)
-                        .monospacedDigit()
+            } else if store.categories.isEmpty && recordings(in: nil).count == store.recordings.count {
+                // No categories in use: single flat section (classic layout)
+                Section {
+                    if store.recordings.isEmpty {
+                        emptyPlaceholder
+                    } else {
+                        recordingRows(store.recordings)
+                    }
+                } header: {
+                    HStack {
+                        Text("Recordings")
+                        Spacer()
+                        Text("\(store.recordings.count)")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.tertiary)
+                            .monospacedDigit()
+                        newCategoryHeaderButton
+                    }
+                }
+            } else {
+                // Categorized: one collapsible section per category + Uncategorized
+                ForEach(store.categories, id: \.self) { category in
+                    Section(isExpanded: expansionBinding(for: category)) {
+                        recordingRows(recordings(in: category))
+                    } header: {
+                        categoryHeader(category, count: recordings(in: category).count)
+                    }
+                }
+
+                let uncategorized = recordings(in: nil)
+                if !uncategorized.isEmpty {
+                    Section(isExpanded: expansionBinding(for: Self.uncategorizedKey)) {
+                        recordingRows(uncategorized)
+                    } header: {
+                        HStack {
+                            Text("Uncategorized")
+                            Spacer()
+                            Text("\(uncategorized.count)")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.tertiary)
+                                .monospacedDigit()
+                            newCategoryHeaderButton
+                        }
+                    }
                 }
             }
         }
@@ -142,11 +143,216 @@ struct RecordingListView: View {
                 store.update(recordingID) { $0.name = newName.isEmpty ? nil : newName }
             }
         }
+        .sheet(item: $newCategorySheet) { target in
+            CategoryNameSheet(title: "New Category", initialName: "") { name in
+                store.addCategory(name)
+                if let recordingID = target.recordingID {
+                    store.update(recordingID) { $0.category = name }
+                }
+            }
+        }
+        .sheet(item: $renamingCategory) { category in
+            CategoryNameSheet(title: "Rename Category", initialName: category) { name in
+                store.renameCategory(category, to: name)
+            }
+        }
         .onChange(of: selectedRecordingID) { _, newValue in
             if newValue != nil { showGlobalChat = false }
         }
     }
 
+    private var emptyPlaceholder: some View {
+        VStack(spacing: 8) {
+            Image(systemName: searchQuery.isEmpty ? "waveform.slash" : "magnifyingglass")
+                .font(.title2)
+                .foregroundStyle(.quaternary)
+            Text(searchQuery.isEmpty ? "No recordings yet" : "No matches")
+                .font(.subheadline)
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 16)
+    }
+
+    private var newCategoryHeaderButton: some View {
+        Button(action: { newCategorySheet = NewCategoryTarget(recordingID: nil) }) {
+            Image(systemName: "folder.badge.plus")
+                .font(.caption)
+        }
+        .buttonStyle(.plain)
+        .help("New Category")
+    }
+
+    private func categoryHeader(_ category: String, count: Int) -> some View {
+        HStack {
+            Text(category)
+            Spacer()
+            Text("\(count)")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.tertiary)
+                .monospacedDigit()
+        }
+        .contextMenu {
+            Button("Rename Category…") { renamingCategory = category }
+            Button("Delete Category", role: .destructive) {
+                store.deleteCategory(category)
+            }
+        }
+    }
+
+    // MARK: - Rows
+
+    @ViewBuilder
+    private func recordingRows(_ recordings: [Recording]) -> some View {
+        ForEach(recordings) { recording in
+            RecordingRow(recording: recording)
+                .tag(recording.id)
+                .contextMenu { rowContextMenu(recording) }
+        }
+    }
+
+    @ViewBuilder
+    private func rowContextMenu(_ recording: Recording) -> some View {
+        Button {
+            audioRecorder.playRecording(recording)
+        } label: {
+            Label("Play", systemImage: "play.fill")
+        }
+
+        Menu {
+            Button("On-Device (Local)") {
+                transcriptionService.enqueue(recording.id, using: .local)
+            }
+            Button("OpenAI") {
+                transcriptionService.enqueue(recording.id, using: .openAI)
+            }
+            .disabled(!KeychainStore.shared.has(.openAI))
+            Button("AssemblyAI") {
+                transcriptionService.enqueue(recording.id, using: .assemblyAI)
+            }
+            .disabled(!KeychainStore.shared.has(.assemblyAI))
+        } label: {
+            Label(recording.status.isResumable ? "Resume Transcription" : "Transcribe",
+                  systemImage: "waveform.badge.mic")
+        }
+        .disabled(!recording.status.canStartTranscription)
+
+        Button {
+            renamingRecordingID = recording.id
+            renameText = recording.name ?? ""
+        } label: {
+            Label("Rename", systemImage: "pencil")
+        }
+
+        Menu {
+            ForEach(store.categories, id: \.self) { category in
+                Button {
+                    store.update(recording.id) { $0.category = category }
+                } label: {
+                    if recording.category == category {
+                        Label(category, systemImage: "checkmark")
+                    } else {
+                        Text(category)
+                    }
+                }
+            }
+            if !store.categories.isEmpty {
+                Divider()
+            }
+            Button {
+                store.update(recording.id) { $0.category = nil }
+            } label: {
+                if recording.category == nil {
+                    Label("Uncategorized", systemImage: "checkmark")
+                } else {
+                    Text("Uncategorized")
+                }
+            }
+            Divider()
+            Button("New Category…") {
+                newCategorySheet = NewCategoryTarget(recordingID: recording.id)
+            }
+        } label: {
+            Label("Move to", systemImage: "folder")
+        }
+
+        Button {
+            store.showInFinder(recording)
+        } label: {
+            Label("Show in Finder", systemImage: "folder")
+        }
+
+        Divider()
+
+        Button(role: .destructive) {
+            if selectedRecordingID == recording.id {
+                selectedRecordingID = nil
+            }
+            if audioRecorder.playingRecordingID == recording.id {
+                audioRecorder.stopPlayback()
+            }
+            store.delete(recording)
+        } label: {
+            Label("Delete", systemImage: "trash")
+        }
+    }
+
+    // MARK: - Expansion persistence
+
+    /// Sections default to expanded; only explicit collapses are remembered.
+    private func expansionBinding(for key: String) -> Binding<Bool> {
+        Binding(
+            get: { !collapsedCategories.contains(key) },
+            set: { expanded in
+                if expanded { collapsedCategories.remove(key) } else { collapsedCategories.insert(key) }
+                UserDefaults.standard.set(Array(collapsedCategories), forKey: "collapsedCategories")
+            }
+        )
+    }
+}
+
+// Allow String to drive .sheet(item:) for category renames.
+extension String: @retroactive Identifiable {
+    public var id: String { self }
+}
+
+// MARK: - Category Name Sheet
+
+struct CategoryNameSheet: View {
+    let title: String
+    let initialName: String
+    let onSave: (String) -> Void
+    @State private var name = ""
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text(title)
+                .font(.headline)
+            TextField("Category name", text: $name)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 260)
+                .onSubmit { save() }
+            HStack(spacing: 12) {
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Save") { save() }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+                    .tint(AppTheme.accent)
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(24)
+        .onAppear { name = initialName }
+    }
+
+    private func save() {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        onSave(trimmed)
+        dismiss()
+    }
 }
 
 // Make UUID conform to Identifiable for .sheet(item:)

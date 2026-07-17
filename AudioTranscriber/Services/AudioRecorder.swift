@@ -257,11 +257,28 @@ final class AudioRecorder: NSObject {
 
     // MARK: - Private
 
+    /// WAV's 32-bit size header caps files at 4 GB; stop safely before that.
+    private static let maxRecordingBytes: Int64 = 3_900_000_000
+
     private func startTimer() {
+        var tick = 0
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             guard let self, let start = self.recordingStartDate else { return }
             // Wall-clock, not accumulation — immune to timer drift on long recordings.
             self.recordingDuration = Date().timeIntervalSince(start)
+
+            // Check the file-size cap every ~10s.
+            tick += 1
+            if tick % 100 == 0, let file = self.audioFile {
+                let bytesPerFrame = Int64(file.fileFormat.streamDescription.pointee.mBytesPerFrame)
+                let approximateBytes = Int64(file.length) * max(1, bytesPerFrame)
+                if approximateBytes > Self.maxRecordingBytes {
+                    Task { @MainActor in
+                        self.stopRecording()
+                        self.errorMessage = "Recording stopped automatically: the WAV format's 4 GB limit was reached. The recording so far has been saved."
+                    }
+                }
+            }
         }
     }
 

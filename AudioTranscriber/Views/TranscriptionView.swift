@@ -44,6 +44,9 @@ struct TranscriptionView: View {
     var body: some View {
         VStack(spacing: 0) {
             headerBar
+            if isPlayingThis {
+                playbackBar
+            }
             Divider()
 
             // Tab picker for completed recordings
@@ -165,6 +168,68 @@ struct TranscriptionView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(.bar)
+    }
+
+    // MARK: - Playback bar
+
+    private var playbackBar: some View {
+        HStack(spacing: 10) {
+            Text(timeString(audioRecorder.playbackTime))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 52, alignment: .trailing)
+
+            Slider(
+                value: Binding(
+                    get: { min(audioRecorder.playbackTime, recording.duration) },
+                    set: { audioRecorder.seek(to: $0) }
+                ),
+                in: 0...max(1, recording.duration)
+            )
+            .controlSize(.small)
+
+            Text(timeString(recording.duration))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.tertiary)
+                .frame(width: 52, alignment: .leading)
+
+            Menu {
+                ForEach([0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
+                    Button {
+                        audioRecorder.setPlaybackRate(Float(rate))
+                    } label: {
+                        if abs(Double(audioRecorder.playbackRate) - rate) < 0.01 {
+                            Label(rateLabel(rate), systemImage: "checkmark")
+                        } else {
+                            Text(rateLabel(rate))
+                        }
+                    }
+                }
+            } label: {
+                Text(rateLabel(Double(audioRecorder.playbackRate)))
+                    .font(.caption.weight(.semibold).monospacedDigit())
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Playback speed")
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
+        .background(.bar)
+    }
+
+    private func timeString(_ seconds: TimeInterval) -> String {
+        let total = Int(max(0, seconds))
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let secs = total % 60
+        return hours > 0
+            ? String(format: "%d:%02d:%02d", hours, minutes, secs)
+            : String(format: "%d:%02d", minutes, secs)
+    }
+
+    private func rateLabel(_ rate: Double) -> String {
+        rate == rate.rounded() ? "\(Int(rate))×" : String(format: "%.2g×", rate)
     }
 
     @ViewBuilder
