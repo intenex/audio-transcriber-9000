@@ -334,11 +334,6 @@ struct RecordingListView: View {
     }
 }
 
-// Allow String to drive .sheet(item:) for category renames.
-extension String: @retroactive Identifiable {
-    public var id: String { self }
-}
-
 // MARK: - Category Name Sheet
 
 struct CategoryNameSheet: View {
@@ -376,11 +371,6 @@ struct CategoryNameSheet: View {
         onSave(trimmed)
         dismiss()
     }
-}
-
-// Make UUID conform to Identifiable for .sheet(item:)
-extension UUID: @retroactive Identifiable {
-    public var id: UUID { self }
 }
 
 // MARK: - Recording Row
