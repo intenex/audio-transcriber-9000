@@ -21,31 +21,13 @@ struct AudioTranscriberApp: App {
                 .environment(speakerLibrary)
                 .environment(liveTranscriber)
                 .onAppear {
-                    LegacySettingsMigrator.runOnce()
-                    recordingStore.load()
-                    speakerLibrary.attach(storageDirectory: recordingStore.storageDirectory)
-                    audioRecorder.attach(store: recordingStore)
-                    audioRecorder.liveTranscriber = liveTranscriber
-                    transcriptionService.attach(store: recordingStore, chatService: chatService,
-                                                speakerLibrary: speakerLibrary)
-                    transcriptionService.cloudEngineFactory = { kind in
-                        switch kind {
-                        case .openAI: return OpenAITranscriptionEngine()
-                        case .assemblyAI: return AssemblyAITranscriptionEngine()
-                        case .local: return nil
-                        }
-                    }
-                    // Auto-transcribe every new recording/import (default ON);
-                    // summary + smart auto-naming follow transcription.
-                    recordingStore.onRecordingAdded = { id in
-                        let auto = UserDefaults.standard.object(forKey: "autoTranscribeNewRecordings") as? Bool ?? true
-                        if auto {
-                            transcriptionService.enqueue(id)
-                        }
-                    }
-                    audioRecorder.requestMicPermission()
-                    modelManager.refreshStatus()
-                    Task { await chatService.checkLocalAvailability() }
+                    AppBootstrap.wire(recordingStore: recordingStore,
+                                      audioRecorder: audioRecorder,
+                                      transcriptionService: transcriptionService,
+                                      chatService: chatService,
+                                      modelManager: modelManager,
+                                      speakerLibrary: speakerLibrary,
+                                      liveTranscriber: liveTranscriber)
                 }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                     recordingStore.saveNow()
