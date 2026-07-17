@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import CoreMedia
 
 enum DetailTab: String, CaseIterable {
     case transcript = "Transcript"
@@ -13,6 +14,8 @@ struct TranscriptionView: View {
     @Environment(TranscriptionService.self) private var transcriptionService
     @Environment(AudioRecorder.self) private var audioRecorder
     @Environment(ChatService.self) private var chatService
+    @Environment(SpeakerLibraryStore.self) private var speakerLibrary
+    @Environment(ModelManager.self) private var modelManager
 
     @State private var markdownContent: String? = nil
     @State private var segments: [TranscriptionSegment]? = nil
@@ -29,6 +32,8 @@ struct TranscriptionView: View {
     @State private var editingSpeakerID: String? = nil
     @State private var editingSpeakerName: String = ""
     @State private var cloudConfirmKind: TranscriptionEngineKind? = nil
+    @State private var rememberVoice = true
+    @State private var isEnrollingVoice = false
     @AppStorage("defaultTranscriptionEngine") private var defaultEngineRaw = TranscriptionEngineKind.local.rawValue
     @AppStorage("confirmCloudTranscription") private var confirmCloud = true
 
@@ -598,6 +603,17 @@ struct TranscriptionView: View {
                             .onSubmit {
                                 saveSpeakerName(speakerID: speaker.id)
                             }
+                        Toggle("Remember this voice", isOn: $rememberVoice)
+                            .font(.caption)
+                            .help("Save a voice sample so this person is recognized automatically in future transcripts")
+                        if isEnrollingVoice {
+                            HStack(spacing: 6) {
+                                ProgressView().scaleEffect(0.5)
+                                Text("Saving voice sample…")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
                         HStack {
                             if speakerNames[speaker.id] != nil {
                                 Button("Reset") {
@@ -659,9 +675,66 @@ struct TranscriptionView: View {
             speakerNames.removeValue(forKey: speakerID)
         } else {
             speakerNames[speakerID] = trimmed
+            if rememberVoice {
+                enrollVoice(name: trimmed, speakerID: speakerID)
+            }
         }
         editingSpeakerID = nil
         saveSpeakerNames()
+    }
+
+    /// Extract reference clips + embedding for the named speaker and store them
+    /// in the voice library so they're auto-recognized in future transcripts.
+    private func enrollVoice(name: String, speakerID: String) {
+        guard let segs = segments, !segs.isEmpty else { return }
+        // Embedding extraction needs the local speaker models; skip quietly if absent.
+        guard modelManager.allReady else { return }
+
+        let candidates = ReferenceClipExtractor.selectCandidates(segments: segs, speakerID: speakerID)
+        guard !candidates.isEmpty else { return }
+
+        let audioURL = recording.fileURL
+        let recordingID = recording.id
+        let engine = transcriptionService.localFluidEngine
+        let library = speakerLibrary
+
+        isEnrollingVoice = true
+        Task {
+            defer { isEnrollingVoice = false }
+
+            var embeddings: [[Float]] = []
+            var clips: [EnrolledSpeaker.Clip] = []
+            let speakerUUID = UUID()
+
+            for (index, candidate) in candidates.enumerated() {
+                // Embedding from raw samples
+                if let samples = try? ReferenceClipExtractor.samples16k(
+                    from: audioURL, start: candidate.start, end: candidate.end),
+                   samples.count > 16_000,   // at least 1s
+                   let embedding = try? await engine.extractEmbedding(samples: samples) {
+                    embeddings.append(embedding)
+                }
+
+                // Compressed clip for cloud known-speaker references
+                let clipDir = library.clipsDirectory.appendingPathComponent(speakerUUID.uuidString, isDirectory: true)
+                try? FileManager.default.createDirectory(at: clipDir, withIntermediateDirectories: true)
+                let clipURL = clipDir.appendingPathComponent("clip-\(index + 1).m4a")
+                let range = CMTimeRange(
+                    start: CMTime(seconds: candidate.start, preferredTimescale: 600),
+                    end: CMTime(seconds: candidate.end, preferredTimescale: 600))
+                if (try? await AudioCompressor.compress(source: audioURL, timeRange: range, to: clipURL)) != nil {
+                    clips.append(EnrolledSpeaker.Clip(
+                        file: "clips/\(speakerUUID.uuidString)/clip-\(index + 1).m4a",
+                        duration: candidate.duration,
+                        sourceRecordingID: recordingID,
+                        start: candidate.start,
+                        end: candidate.end))
+                }
+            }
+
+            guard !embeddings.isEmpty || !clips.isEmpty else { return }
+            library.enroll(name: name, embeddings: embeddings, clips: clips, recordingID: recordingID)
+        }
     }
 
     private func transcriptTabContent(_ content: String) -> some View {

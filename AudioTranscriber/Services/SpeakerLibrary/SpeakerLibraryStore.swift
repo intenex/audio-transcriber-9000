@@ -52,8 +52,10 @@ final class SpeakerLibraryStore {
 
     func load() {
         try? FileManager.default.createDirectory(at: clipsDirectory, withIntermediateDirectories: true)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
         guard let data = try? Data(contentsOf: libraryURL),
-              let library = try? JSONDecoder().decode(Library.self, from: data) else {
+              let library = try? decoder.decode(Library.self, from: data) else {
             speakers = []
             return
         }
@@ -100,8 +102,15 @@ final class SpeakerLibraryStore {
     }
 
     func delete(_ speaker: EnrolledSpeaker) {
-        let speakerClipDir = clipsDirectory.appendingPathComponent(speaker.id.uuidString, isDirectory: true)
-        try? FileManager.default.removeItem(at: speakerClipDir)
+        for clip in speaker.clips {
+            let url = clipURL(for: clip)
+            try? FileManager.default.removeItem(at: url)
+            // Remove the containing directory when empty.
+            let dir = url.deletingLastPathComponent()
+            if let contents = try? FileManager.default.contentsOfDirectory(atPath: dir.path), contents.isEmpty {
+                try? FileManager.default.removeItem(at: dir)
+            }
+        }
         speakers.removeAll { $0.id == speaker.id }
         save()
     }
