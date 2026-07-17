@@ -23,6 +23,16 @@ A native macOS app for recording audio, transcribing speech to text with speaker
 
 ---
 
+## Documentation
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — full system map (engines, queue, stores, providers, data formats)
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — contributor rules, invariants, gotchas, recipes
+- [docs/TESTING.md](docs/TESTING.md) — test suites, integration gates, baselines, manual checklists
+- [docs/HISTORY-2026-07-OVERHAUL.md](docs/HISTORY-2026-07-OVERHAUL.md) — why the architecture is this way
+- `CLAUDE.md` / `AGENTS.md` — agent instructions (byte-identical mirrors)
+
+---
+
 ## Requirements
 
 - **macOS 14.0 (Sonoma)** or later, **Apple Silicon** (M1+)
