@@ -51,12 +51,19 @@ struct ChatView: View {
 
             Divider()
 
-            // Input bar
-            HStack(spacing: 8) {
+            // Input bar — Enter sends, Shift+Enter inserts newline
+            HStack(alignment: .bottom, spacing: 8) {
                 TextField("Ask about this recording...", text: $inputText, axis: .vertical)
                     .textFieldStyle(.plain)
                     .lineLimit(1...5)
-                    .onSubmit { sendMessage() }
+                    .onKeyPress(.return, phases: .down) { keyPress in
+                        if keyPress.modifiers.contains(.shift) {
+                            inputText.append("\n")
+                            return .handled
+                        }
+                        sendMessage()
+                        return .handled
+                    }
 
                 Button(action: sendMessage) {
                     Image(systemName: "arrow.up.circle.fill")

@@ -19,13 +19,15 @@ import warnings
 
 def setup_logging():
     """Redirect all logging and warnings to stderr so only JSON goes to stdout."""
-    # Force all loggers to write to stderr
-    logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
-    for name in logging.root.manager.loggerDict:
+    # Reset root logger: single handler writing to stderr
+    root = logging.getLogger()
+    root.handlers = [logging.StreamHandler(sys.stderr)]
+    root.setLevel(logging.DEBUG)
+
+    # Clear handlers from all existing loggers so they propagate to root
+    for name in list(logging.root.manager.loggerDict):
         logger = logging.getLogger(name)
         logger.handlers = []
-        handler = logging.StreamHandler(sys.stderr)
-        logger.addHandler(handler)
 
     # Redirect Python warnings to stderr
     warnings.showwarning = lambda msg, cat, fn, lineno, file=None, line=None: \
@@ -51,11 +53,17 @@ def emit_progress(step: int, total: int, message: str):
 def transcribe(audio_file: str, hf_token: str, model_name: str = "large-v3", language: str = "auto") -> dict:
     setup_logging()
 
+    # Redirect stdout → stderr for the entire function.
+    # whisperx internals write INFO logs to stdout that corrupt the JSON output.
+    _real_stdout = sys.stdout
+    sys.stdout = sys.stderr
+
     import time
     start_time = time.time()
 
     emit_progress(0, 5, "Loading model...")
     import whisperx
+    setup_logging()  # Re-apply: catch any loggers created during import
 
     device = "cpu"
     compute_type = "int8"
@@ -139,6 +147,9 @@ def transcribe(audio_file: str, hf_token: str, model_name: str = "large-v3", lan
     elapsed = time.time() - start_time
     sys.stderr.write(f"PROGRESS:100:Done in {elapsed:.1f}s\n")
     sys.stderr.flush()
+
+    # Restore real stdout before returning (so main() can print JSON)
+    sys.stdout = _real_stdout
 
     return {
         "segments": segments,

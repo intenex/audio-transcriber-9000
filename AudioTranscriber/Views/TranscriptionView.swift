@@ -24,6 +24,9 @@ struct TranscriptionView: View {
     @State private var loadedSummary: RecordingSummary? = nil
     @State private var isRegeneratingSummary = false
     @State private var transcriptSearchQuery = ""
+    @State private var speakerNames: [String: String] = [:]
+    @State private var editingSpeakerID: String? = nil
+    @State private var editingSpeakerName: String = ""
 
     private var isPlayingThis: Bool {
         audioRecorder.isPlaying && audioRecorder.playingRecordingID == recording.id
@@ -184,7 +187,8 @@ struct TranscriptionView: View {
         HStack(spacing: 8) {
             if recording.status == .done, markdownContent != nil {
                 Button(action: {
-                    copyToClipboard(markdownContent!)
+                    let exportContent = exportableTranscript()
+                    copyToClipboard(exportContent)
                     withAnimation(.spring(duration: 0.3)) { showCopiedToast = true }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                         withAnimation { showCopiedToast = false }
@@ -196,11 +200,43 @@ struct TranscriptionView: View {
                 .buttonStyle(.bordered)
                 .tint(AppTheme.accent)
 
-                Button(action: { exportMarkdown(markdownContent!) }) {
+                Menu {
+                    Section("Transcript") {
+                        Button(action: { exportTranscript() }) {
+                            Label("Export Transcript (.md)", systemImage: "doc.text")
+                        }
+                    }
+
+                    Section("Audio") {
+                        Button(action: { exportAudio(format: .wav) }) {
+                            Label("Export as WAV (\(audioSizeEstimate(format: .wav)))", systemImage: "waveform")
+                        }
+                        Button(action: { exportAudio(format: .mp3) }) {
+                            Label("Export as MP3 (\(audioSizeEstimate(format: .mp3)))", systemImage: "waveform.badge.minus")
+                        }
+                    }
+
+                    if loadedSummary != nil {
+                        Section("Summary") {
+                            Button(action: { exportSummary() }) {
+                                Label("Export Summary (.md)", systemImage: "doc.text.magnifyingglass")
+                            }
+                        }
+                    }
+
+                    if hasChatHistory {
+                        Section("Chat") {
+                            Button(action: { exportChat() }) {
+                                Label("Export Chat (.md)", systemImage: "bubble.left.and.bubble.right")
+                            }
+                        }
+                    }
+                } label: {
                     Label("Export", systemImage: "square.and.arrow.up")
                         .font(.subheadline.weight(.medium))
                 }
-                .buttonStyle(.bordered)
+                .menuStyle(.borderlessButton)
+                .fixedSize()
             }
 
             if recording.status == .pending || recording.status == .failed {
@@ -211,6 +247,23 @@ struct TranscriptionView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(AppTheme.accent)
                 .disabled(transcriptionService.isTranscribing)
+            }
+
+            // Always show audio export even without transcription
+            if recording.status != .done {
+                Menu {
+                    Button(action: { exportAudio(format: .wav) }) {
+                        Label("Export as WAV (\(audioSizeEstimate(format: .wav)))", systemImage: "waveform")
+                    }
+                    Button(action: { exportAudio(format: .mp3) }) {
+                        Label("Export as MP3 (\(audioSizeEstimate(format: .mp3)))", systemImage: "waveform.badge.minus")
+                    }
+                } label: {
+                    Label("Export Audio", systemImage: "square.and.arrow.up")
+                        .font(.subheadline.weight(.medium))
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
             }
 
             // Show in Finder
@@ -329,14 +382,148 @@ struct TranscriptionView: View {
     }
 
     private func interactiveTranscriptContent(_ segs: [TranscriptionSegment]) -> some View {
-        InteractiveTranscriptView(
-            segments: segs,
-            currentTime: audioRecorder.playbackTime,
-            isPlaying: isPlayingThis,
-            onSeek: { time in
-                audioRecorder.seekAndPlay(to: time, recording: recording)
+        VStack(spacing: 0) {
+            // Search bar
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.tertiary)
+                TextField("Find in transcript...", text: $transcriptSearchQuery)
+                    .textFieldStyle(.plain)
+                if !transcriptSearchQuery.isEmpty {
+                    let count = countMatchesInSegments(segs, query: transcriptSearchQuery)
+                    Text("\(count) match\(count == 1 ? "" : "es")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button(action: { transcriptSearchQuery = "" }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-        )
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+            .background(.bar)
+            Divider()
+
+            // Speaker rename pills
+            if !uniqueSpeakers(in: segs).isEmpty {
+                speakerPillsBar(speakers: uniqueSpeakers(in: segs))
+                Divider()
+            }
+
+            InteractiveTranscriptView(
+                segments: segs,
+                currentTime: audioRecorder.playbackTime,
+                isPlaying: isPlayingThis,
+                onSeek: { time in
+                    audioRecorder.seekAndPlay(to: time, recording: recording)
+                },
+                speakerNames: speakerNames,
+                searchQuery: transcriptSearchQuery
+            )
+        }
+    }
+
+    private func speakerPillsBar(speakers: [(id: String, num: Int)]) -> some View {
+        HStack(spacing: 8) {
+            Text("Speakers:")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            ForEach(speakers, id: \.id) { speaker in
+                let displayName = speakerNames[speaker.id] ?? "Speaker \(speaker.num)"
+                Button(action: {
+                    editingSpeakerID = speaker.id
+                    editingSpeakerName = speakerNames[speaker.id] ?? ""
+                }) {
+                    HStack(spacing: 4) {
+                        Text(displayName)
+                            .font(.caption.weight(.medium))
+                        Image(systemName: "pencil")
+                            .font(.system(size: 9))
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(AppTheme.accent.opacity(0.1), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .popover(isPresented: Binding(
+                    get: { editingSpeakerID == speaker.id },
+                    set: { if !$0 { editingSpeakerID = nil } }
+                )) {
+                    VStack(spacing: 8) {
+                        Text("Rename Speaker \(speaker.num)")
+                            .font(.headline)
+                        TextField("Name", text: $editingSpeakerName)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 200)
+                            .onSubmit {
+                                saveSpeakerName(speakerID: speaker.id)
+                            }
+                        HStack {
+                            if speakerNames[speaker.id] != nil {
+                                Button("Reset") {
+                                    speakerNames.removeValue(forKey: speaker.id)
+                                    editingSpeakerID = nil
+                                    saveSpeakerNames()
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                            Spacer()
+                            Button("Cancel") { editingSpeakerID = nil }
+                                .buttonStyle(.bordered)
+                            Button("Save") {
+                                saveSpeakerName(speakerID: speaker.id)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(AppTheme.accent)
+                        }
+                    }
+                    .padding()
+                    .frame(width: 260)
+                }
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .background(.bar)
+    }
+
+    private func uniqueSpeakers(in segs: [TranscriptionSegment]) -> [(id: String, num: Int)] {
+        var order: [(id: String, num: Int)] = []
+        var seen: Set<String> = []
+        for seg in segs {
+            if !seen.contains(seg.speaker) {
+                seen.insert(seg.speaker)
+                order.append((id: seg.speaker, num: order.count + 1))
+            }
+        }
+        return order
+    }
+
+    private func countMatchesInSegments(_ segs: [TranscriptionSegment], query: String) -> Int {
+        guard !query.isEmpty else { return 0 }
+        let queryLower = query.lowercased()
+        let fullText = segs.map { $0.text }.joined(separator: " ").lowercased()
+        var count = 0
+        var searchRange = fullText.startIndex..<fullText.endIndex
+        while let range = fullText.range(of: queryLower, range: searchRange) {
+            count += 1
+            searchRange = range.upperBound..<fullText.endIndex
+        }
+        return count
+    }
+
+    private func saveSpeakerName(speakerID: String) {
+        let trimmed = editingSpeakerName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            speakerNames.removeValue(forKey: speakerID)
+        } else {
+            speakerNames[speakerID] = trimmed
+        }
+        editingSpeakerID = nil
+        saveSpeakerNames()
     }
 
     private func transcriptTabContent(_ content: String) -> some View {
@@ -504,6 +691,10 @@ struct TranscriptionView: View {
 
     // MARK: - Actions
 
+    private var speakerNamesURL: URL {
+        recording.fileURL.deletingPathExtension().appendingPathExtension("speakers.json")
+    }
+
     private func loadMarkdown() {
         guard let url = recording.transcriptionURL else {
             markdownContent = nil
@@ -523,8 +714,28 @@ struct TranscriptionView: View {
                 isLoading = false
             }
         }
-        // Also load summary sidecar
+        // Also load summary and speaker names sidecars
         loadedSummary = SummarizationService.loadSummary(for: recording)
+        loadSpeakerNames()
+    }
+
+    private func loadSpeakerNames() {
+        guard let data = try? Data(contentsOf: speakerNamesURL),
+              let names = try? JSONDecoder().decode([String: String].self, from: data) else {
+            speakerNames = [:]
+            return
+        }
+        speakerNames = names
+    }
+
+    private func saveSpeakerNames() {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .prettyPrinted
+        if speakerNames.isEmpty {
+            try? FileManager.default.removeItem(at: speakerNamesURL)
+        } else if let data = try? encoder.encode(speakerNames) {
+            try? data.write(to: speakerNamesURL)
+        }
     }
 
     private func saveName() {
@@ -609,15 +820,172 @@ struct TranscriptionView: View {
         NSPasteboard.general.setString(text, forType: .string)
     }
 
-    private func exportMarkdown(_ content: String) {
+    /// Generate transcript markdown with custom speaker names and recording name applied
+    private func exportableTranscript() -> String {
+        guard let content = markdownContent else { return "" }
+        return MarkdownFormatter.applyCustomNames(
+            to: content,
+            segments: segments,
+            customSpeakerNames: speakerNames,
+            recordingName: recording.name
+        )
+    }
+
+    private func exportTranscript() {
+        let content = exportableTranscript()
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.plainText]
-        let dateStr = recording.date.formatted(.dateTime.year().month().day())
-        panel.nameFieldStringValue = "transcription_\(dateStr).md"
+        let baseName = recording.name ?? "transcription_\(recording.date.formatted(.dateTime.year().month().day()))"
+        panel.nameFieldStringValue = "\(sanitizeFilename(baseName)).md"
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
             try? content.write(to: url, atomically: true, encoding: .utf8)
         }
+    }
+
+    private enum AudioExportFormat { case wav, mp3 }
+
+    private func audioSizeEstimate(format: AudioExportFormat) -> String {
+        let fileSize = (try? FileManager.default.attributesOfItem(atPath: recording.fileURL.path)[.size] as? Int64) ?? 0
+        switch format {
+        case .wav:
+            return formatFileSize(fileSize)
+        case .mp3:
+            // WAV → MP3 at 128kbps is roughly 1/10th of 16-bit 44.1kHz WAV, or duration-based estimate
+            let estimatedMP3 = max(Int64(recording.duration * 16000), fileSize / 10)
+            return "~\(formatFileSize(estimatedMP3))"
+        }
+    }
+
+    private func formatFileSize(_ bytes: Int64) -> String {
+        if bytes < 1024 { return "\(bytes) B" }
+        let kb = Double(bytes) / 1024
+        if kb < 1024 { return String(format: "%.0f KB", kb) }
+        let mb = kb / 1024
+        return String(format: "%.1f MB", mb)
+    }
+
+    private func exportAudio(format: AudioExportFormat) {
+        let panel = NSSavePanel()
+        let baseName = recording.name ?? "recording_\(recording.date.formatted(.dateTime.year().month().day()))"
+        let safeName = sanitizeFilename(baseName)
+
+        switch format {
+        case .wav:
+            panel.allowedContentTypes = [.wav]
+            panel.nameFieldStringValue = "\(safeName).wav"
+            panel.begin { response in
+                guard response == .OK, let url = panel.url else { return }
+                try? FileManager.default.copyItem(at: recording.fileURL, to: url)
+            }
+        case .mp3:
+            panel.allowedContentTypes = [.mp3]
+            panel.nameFieldStringValue = "\(safeName).mp3"
+            panel.begin { response in
+                guard response == .OK, let destURL = panel.url else { return }
+                self.convertToMP3(source: recording.fileURL, destination: destURL)
+            }
+        }
+    }
+
+    private func convertToMP3(source: URL, destination: URL) {
+        Task.detached(priority: .userInitiated) {
+            let process = Process()
+            // Use ffmpeg (commonly available, also used by whisperX)
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = ["ffmpeg", "-y", "-i", source.path, "-codec:a", "libmp3lame", "-b:a", "128k", destination.path]
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+
+            do {
+                try process.run()
+                process.waitUntilExit()
+                if process.terminationStatus != 0 {
+                    await MainActor.run {
+                        self.audioRecorder.errorMessage = "MP3 conversion failed. Ensure ffmpeg is installed."
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.audioRecorder.errorMessage = "MP3 conversion failed: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    private func exportSummary() {
+        guard let summary = loadedSummary else { return }
+        var lines: [String] = []
+        let title = recording.name ?? "Recording — \(recording.formattedDate)"
+        lines.append("# Summary: \(title)")
+        lines.append("")
+        lines.append("## Summary")
+        lines.append("")
+        lines.append(summary.summary)
+        lines.append("")
+        if !summary.actionItems.isEmpty {
+            lines.append("## Action Items")
+            lines.append("")
+            for item in summary.actionItems {
+                lines.append("- \(item)")
+            }
+            lines.append("")
+        }
+        lines.append("---")
+        lines.append("*Generated \(summary.generatedAt.formatted())*")
+
+        let content = lines.joined(separator: "\n")
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.plainText]
+        let baseName = recording.name ?? "summary_\(recording.date.formatted(.dateTime.year().month().day()))"
+        panel.nameFieldStringValue = "\(sanitizeFilename(baseName))_summary.md"
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            try? content.write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+
+    private var hasChatHistory: Bool {
+        let chatURL = recording.fileURL.deletingPathExtension().appendingPathExtension("chat.json")
+        return FileManager.default.fileExists(atPath: chatURL.path)
+    }
+
+    private func exportChat() {
+        let chatURL = recording.fileURL.deletingPathExtension().appendingPathExtension("chat.json")
+        guard let data = try? Data(contentsOf: chatURL),
+              let history = try? JSONDecoder().decode(ChatHistory.self, from: data) else { return }
+
+        var lines: [String] = []
+        let title = recording.name ?? "Recording — \(recording.formattedDate)"
+        lines.append("# Chat: \(title)")
+        lines.append("")
+
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateStyle = .short
+        dateFormatter.timeStyle = .short
+
+        for msg in history.messages where msg.role != .system {
+            let sender = msg.role == .user ? "**You**" : "**AI**"
+            lines.append("\(sender) — \(dateFormatter.string(from: msg.timestamp))")
+            lines.append("")
+            lines.append(msg.content)
+            lines.append("")
+        }
+
+        let content = lines.joined(separator: "\n")
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.plainText]
+        let baseName = recording.name ?? "chat_\(recording.date.formatted(.dateTime.year().month().day()))"
+        panel.nameFieldStringValue = "\(sanitizeFilename(baseName))_chat.md"
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            try? content.write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+
+    private func sanitizeFilename(_ name: String) -> String {
+        let invalidChars = CharacterSet(charactersIn: "/\\:*?\"<>|")
+        return name.components(separatedBy: invalidChars).joined(separator: "_")
     }
 
     private func attributedMarkdown(_ markdown: String) -> AttributedString {

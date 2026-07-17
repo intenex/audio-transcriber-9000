@@ -24,7 +24,10 @@ struct RecordingListView: View {
     var body: some View {
         List(selection: $selectedRecordingID) {
             Section {
-                RecordingControlRow()
+                RecordingControlRow(onShowRecordingScreen: {
+                    selectedRecordingID = nil
+                    showGlobalChat = false
+                })
                 ImportAudioRow()
                 GlobalChatRow(showGlobalChat: $showGlobalChat, selectedRecordingID: $selectedRecordingID)
             }
@@ -236,9 +239,16 @@ struct RecordingRow: View {
 
 struct RecordingControlRow: View {
     @Environment(AudioRecorder.self) private var audioRecorder
+    var onShowRecordingScreen: (() -> Void)?
 
     var body: some View {
-        Button(action: toggleRecording) {
+        Button(action: {
+            if audioRecorder.isRecording {
+                audioRecorder.stopRecording()
+            } else {
+                onShowRecordingScreen?()
+            }
+        }) {
             HStack(spacing: 8) {
                 ZStack {
                     Circle()
@@ -254,14 +264,6 @@ struct RecordingControlRow: View {
             }
         }
         .buttonStyle(.plain)
-    }
-
-    private func toggleRecording() {
-        if audioRecorder.isRecording {
-            audioRecorder.stopRecording()
-        } else {
-            audioRecorder.startRecording()
-        }
     }
 }
 

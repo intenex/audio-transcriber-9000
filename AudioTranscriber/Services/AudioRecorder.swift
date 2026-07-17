@@ -198,13 +198,15 @@ final class AudioRecorder: NSObject {
         if let markdownURL = recording.transcriptionURL {
             try? FileManager.default.removeItem(at: markdownURL)
         }
-        // Delete sidecar files (summary, chat, segments)
+        // Delete sidecar files (summary, chat, segments, speakers)
         let summaryURL = recording.fileURL.deletingPathExtension().appendingPathExtension("summary.json")
         let chatURL = recording.fileURL.deletingPathExtension().appendingPathExtension("chat.json")
         let segmentsURL = recording.fileURL.deletingPathExtension().appendingPathExtension("segments.json")
+        let speakersURL = recording.fileURL.deletingPathExtension().appendingPathExtension("speakers.json")
         try? FileManager.default.removeItem(at: summaryURL)
         try? FileManager.default.removeItem(at: chatURL)
         try? FileManager.default.removeItem(at: segmentsURL)
+        try? FileManager.default.removeItem(at: speakersURL)
 
         recordings.removeAll { $0.id == recording.id }
         saveRecordings()

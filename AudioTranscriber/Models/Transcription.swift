@@ -50,16 +50,18 @@ struct MarkdownFormatter {
         return rawSpeaker
     }
 
-    static func format(result: TranscriptionResult, recording: Recording) -> String {
+    static func format(result: TranscriptionResult, recording: Recording, customSpeakerNames: [String: String] = [:]) -> String {
         var lines: [String] = []
 
-        // Header
+        // Header — use recording name if set
         let dateFormatter = DateFormatter()
         dateFormatter.dateStyle = .long
         dateFormatter.timeStyle = .short
         let dateStr = dateFormatter.string(from: recording.date)
-        lines.append("# Transcription — \(dateStr)")
+        let title = recording.name ?? "Transcription — \(dateStr)"
+        lines.append("# \(title)")
         lines.append("")
+        lines.append("**Date:** \(dateStr)")
         lines.append("**Duration:** \(recording.durationString)")
         lines.append("**Speakers detected:** \(result.numSpeakers)")
         lines.append("")
@@ -81,7 +83,7 @@ struct MarkdownFormatter {
         var currentTexts: [String] = []
 
         func flushSpeaker(speaker: String, texts: [String], timestamp: TimeInterval) {
-            let label = speakerLabel(speaker, mapping: speakerMapping)
+            let label = customSpeakerNames[speaker] ?? speakerLabel(speaker, mapping: speakerMapping)
             let ts = formatTimestamp(timestamp)
             lines.append("**\(label)** `[\(ts)]`")
             lines.append("")
@@ -109,6 +111,42 @@ struct MarkdownFormatter {
         }
 
         return lines.joined(separator: "\n")
+    }
+
+    /// Re-formats an existing markdown transcript by replacing speaker labels with custom names
+    static func applyCustomNames(to markdown: String, segments: [TranscriptionSegment]?, customSpeakerNames: [String: String], recordingName: String?) -> String {
+        guard !customSpeakerNames.isEmpty || recordingName != nil else { return markdown }
+
+        var result = markdown
+
+        // Replace the title if recording has a custom name
+        if let name = recordingName {
+            if let titleRange = result.range(of: #"^# .+$"#, options: .regularExpression) {
+                result.replaceSubrange(titleRange, with: "# \(name)")
+            }
+        }
+
+        // Build speaker number mapping from segments
+        if let segments = segments {
+            var speakerOrder: [String] = []
+            var speakerMapping: [String: Int] = [:]
+            for seg in segments {
+                if speakerMapping[seg.speaker] == nil {
+                    speakerOrder.append(seg.speaker)
+                    speakerMapping[seg.speaker] = speakerOrder.count
+                }
+            }
+
+            // Replace speaker labels
+            for (rawID, customName) in customSpeakerNames {
+                if let num = speakerMapping[rawID] {
+                    let defaultLabel = "Speaker \(num)"
+                    result = result.replacingOccurrences(of: "**\(defaultLabel)**", with: "**\(customName)**")
+                }
+            }
+        }
+
+        return result
     }
 
     static func formatTimestamp(_ seconds: TimeInterval) -> String {

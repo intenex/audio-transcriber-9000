@@ -6,6 +6,8 @@ struct InteractiveTranscriptView: NSViewRepresentable {
     let currentTime: Double
     let isPlaying: Bool
     let onSeek: (TimeInterval) -> Void
+    var speakerNames: [String: String] = [:]
+    var searchQuery: String = ""
 
     func makeCoordinator() -> Coordinator {
         Coordinator(onSeek: onSeek)
@@ -42,9 +44,12 @@ struct InteractiveTranscriptView: NSViewRepresentable {
         let coordinator = context.coordinator
         guard let textView = scrollView.documentView as? ClickableTextView else { return }
 
-        if coordinator.needsRebuild(for: segments) {
-            coordinator.buildAndSetText(from: segments, in: textView)
+        if coordinator.needsRebuild(for: segments, speakerNames: speakerNames) {
+            coordinator.buildAndSetText(from: segments, speakerNames: speakerNames, in: textView)
         }
+
+        // Update search highlighting
+        coordinator.updateSearchHighlighting(query: searchQuery)
 
         if isPlaying {
             coordinator.updateHighlighting(for: currentTime)
@@ -58,7 +63,10 @@ struct InteractiveTranscriptView: NSViewRepresentable {
     class Coordinator: NSObject {
         var wordRanges: [(range: NSRange, start: TimeInterval, end: TimeInterval)] = []
         var highlightedRange: NSRange? = nil
+        var searchHighlightedRanges: [NSRange] = []
         var lastSegmentCount: Int = -1
+        var lastSpeakerNames: [String: String] = [:]
+        var lastSearchQuery: String = ""
         let onSeek: (TimeInterval) -> Void
         weak var textView: ClickableTextView?
 
@@ -66,13 +74,15 @@ struct InteractiveTranscriptView: NSViewRepresentable {
             self.onSeek = onSeek
         }
 
-        func needsRebuild(for segments: [TranscriptionSegment]) -> Bool {
-            lastSegmentCount != segments.count
+        func needsRebuild(for segments: [TranscriptionSegment], speakerNames: [String: String]) -> Bool {
+            lastSegmentCount != segments.count || lastSpeakerNames != speakerNames
         }
 
-        func buildAndSetText(from segments: [TranscriptionSegment], in textView: ClickableTextView) {
+        func buildAndSetText(from segments: [TranscriptionSegment], speakerNames: [String: String], in textView: ClickableTextView) {
             wordRanges = []
             highlightedRange = nil
+            searchHighlightedRanges = []
+            lastSearchQuery = ""
             let result = NSMutableAttributedString()
 
             // Speaker mapping: first appearance = Speaker 1, etc.
@@ -131,10 +141,12 @@ struct InteractiveTranscriptView: NSViewRepresentable {
             // Render each speaker group
             for (gi, group) in groups.enumerated() {
                 let speakerNum = speakerMapping[group.speaker] ?? 1
+                let customName = speakerNames[group.speaker]
+                let displayName = customName ?? "Speaker \(speakerNum)"
                 let ts = formatTimestamp(group.firstTime)
                 let headerPara = gi == 0 ? NSMutableParagraphStyle() : headerParagraph
 
-                let headerStr = "Speaker \(speakerNum)   [\(ts)]\n"
+                let headerStr = "\(displayName)   [\(ts)]\n"
                 result.append(NSAttributedString(string: headerStr, attributes: [
                     .font: headerFont,
                     .foregroundColor: headerColor,
@@ -166,6 +178,39 @@ struct InteractiveTranscriptView: NSViewRepresentable {
             textView.textStorage?.setAttributedString(result)
             textView.wordRanges = wordRanges
             lastSegmentCount = segments.count
+            lastSpeakerNames = speakerNames
+        }
+
+        func updateSearchHighlighting(query: String) {
+            guard let textView = textView, let storage = textView.textStorage else { return }
+            guard query != lastSearchQuery else { return }
+            lastSearchQuery = query
+
+            // Clear old search highlights
+            for range in searchHighlightedRanges {
+                if range.location + range.length <= storage.length {
+                    storage.removeAttribute(.underlineStyle, range: range)
+                    storage.removeAttribute(.underlineColor, range: range)
+                }
+            }
+            searchHighlightedRanges = []
+
+            guard !query.isEmpty else { return }
+
+            let fullText = storage.string
+            let lowered = fullText.lowercased()
+            let loweredQuery = query.lowercased()
+            var searchStart = lowered.startIndex
+
+            while let range = lowered.range(of: loweredQuery, range: searchStart..<lowered.endIndex) {
+                let nsRange = NSRange(range, in: fullText)
+                searchHighlightedRanges.append(nsRange)
+                storage.addAttributes([
+                    .underlineStyle: NSUnderlineStyle.thick.rawValue,
+                    .underlineColor: NSColor.systemOrange
+                ], range: nsRange)
+                searchStart = range.upperBound
+            }
         }
 
         func updateHighlighting(for time: Double) {
