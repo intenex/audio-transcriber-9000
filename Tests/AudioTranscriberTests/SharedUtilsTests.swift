@@ -107,11 +107,28 @@ final class KeychainStoreTests: XCTestCase {
         XCTAssertNil(store.get(.custom))
     }
 
-    func testEmptyStringDeletes() {
+    /// Regression: `set("")` used to DELETE the stored key. Combined with the
+    /// SecureField transiently emptying during a paste, that destroyed keys
+    /// the moment users tried to save them. Empty/whitespace is now a no-op —
+    /// removal happens only via explicit delete().
+    func testEmptySetKeepsExistingValue() {
         store.set("value", for: .assemblyAI)
-        store.set("  ", for: .assemblyAI)
-        XCTAssertNil(store.get(.assemblyAI))
-        XCTAssertFalse(store.has(.assemblyAI))
+        store.set("", for: .assemblyAI)
+        store.set("  \n", for: .assemblyAI)
+        XCTAssertEqual(store.get(.assemblyAI), "value")
+        XCTAssertTrue(store.has(.assemblyAI))
+    }
+
+    func testSetTrimsWhitespace() {
+        store.set("  sk-padded \n", for: .custom)
+        XCTAssertEqual(store.get(.custom), "sk-padded")
+    }
+
+    func testSetReportsSuccess() {
+        XCTAssertTrue(store.set("v1", for: .miniMax))
+        XCTAssertTrue(store.set("v2", for: .miniMax))   // update path
+        XCTAssertTrue(store.set("", for: .miniMax))     // no-op path
+        XCTAssertEqual(store.get(.miniMax), "v2")
     }
 
     func testHas() {

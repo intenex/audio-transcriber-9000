@@ -123,7 +123,7 @@ Shared: `AudioCompressor` — windowed **AVAudioFile** reads + persistent AVAudi
 | `<stem>.partial.json` | TranscriptionCheckpoint (deleted on success) | LocalFluidAudioEngine |
 `Recording.allSidecarURLs` is the single deletion list — extend it when adding a sidecar.
 
-**Secrets**: Keychain only (`KeychainStore`, kSecClassGenericPassword, service = bundle id; `SecretKey`: `openai.apiKey`, `minimax.apiKey`, `assemblyai.apiKey`, `custom.apiKey`). `InMemorySecretsStore` for tests. Never mirror secrets into UserDefaults.
+**Secrets**: Keychain only (`KeychainStore`, kSecClassGenericPassword, service = the fixed constant `com.audiortranscriber.AudioTranscriber` — NOT `Bundle.main.bundleIdentifier`, so a future iOS app with a different bundle id finds the same items; `SecretKey`: `openai.apiKey`, `minimax.apiKey`, `assemblyai.apiKey`, `custom.apiKey`). `set` with an empty/whitespace value is a **no-op** — removal is only ever the explicit `delete` (a transiently empty text field must never destroy a key); `set` returns a discardable `Bool` so the UI can surface failures. `InMemorySecretsStore` for tests. Never mirror secrets into UserDefaults.
 
 **UserDefaults inventory** (add new keys to this list): `storageDirectory`, `llmModel`, `recordings` (legacy backup only), `defaultTranscriptionEngine`, `confirmCloudTranscription`, `autoSummarize`, `autoTranscribeNewRecordings` (default **true**), `liveTranscriptionPreview`, `chatProviderID`, `miniMaxModel` (default MiniMax-M3), `openAIChatModel`, `customChatBaseURL`, `customChatModel`, `diarizationClusteringThreshold`, `playbackRate`, `collapsedCategories`, `recordingFormat` (default aacHigh), `importCompression` (default ask), `rtf.<engineID>`, `didCleanupLegacyKeys.v1`, `didCleanupLegacyKeys.v2`.
 

@@ -4,7 +4,7 @@ What exists, how to run it, and what "verified" means in this project. See [DEVE
 
 ## Test suites (Tests/AudioTranscriberTests/, `@testable import AudioTranscriber`)
 
-**Unit — always run, no network, no models (143 tests as of the 2026-07 overhaul):**
+**Unit — always run, no network, no models (164 tests as of 2026-07-17):**
 
 | Suite | Covers |
 |---|---|
@@ -15,7 +15,8 @@ What exists, how to run it, and what "verified" means in this project. See [DEVE
 | `ChatProviderTests` / `ChatServiceSelectionTests` | SSE token streaming, system-prompt prepend, MiniMax `reasoning_content` + `base_resp` error on HTTP 200, 401/missing-key paths, undecodable-chunk tolerance; provider auto-selection (MiniMax→OpenAI→local, explicit wins) |
 | `CloudEngineTests` | AudioSplitPlanner (25 MB math vs the real 4 h 56 m duration), PartMerger (offsets, canonical minting, enrolled-name propagation, S-token continuity), diarized_json + AssemblyAI response parsing, cost estimator, **mocked AssemblyAI end-to-end flow with real audio compression** |
 | `SpeakerLibraryTests` | cosine math + thresholds, library round-trip (iso8601!), case-insensitive upsert, auto-match writes `.speakers.json` without overwriting user names, clip candidate selection rules |
-| `SharedUtilsTests` | SSEParser (chunk boundaries, CRLF, multi-line data, [DONE]), MultipartFormData framing, KeychainStore round-trip (isolated service name) |
+| `SharedUtilsTests` | SSEParser (chunk boundaries, CRLF, multi-line data, [DONE]), MultipartFormData framing, KeychainStore round-trip (isolated service name) incl. **empty-set-is-no-op** (empty writes must never delete a stored key) |
+| `KeychainFieldLiveTests` | In-process end-to-end for `KeychainSecureField`: mounts the real view in an NSWindow inside the hosted app, edits via the real field editor (paste = one-chunk insertText) → debounced Keychain save without Enter; emptying the field + focus loss must NOT delete the stored key. This exists because AX automation cannot focus SwiftUI SecureFields (see below) |
 | `WindowedAudioLoaderTests` | resample length/energy on synthetic WAVs (48 k mono, 44.1 k stereo mixdown, 16 k passthrough), near-empty rejection, **equivalence with FluidAudio's loader on the real fixture** (length ±0.5 %, RMS ±10 %) |
 | `RecordingFormatTests` / `CompressInPlaceTests` | format settings mapping (AAC caps at 48 k, never upsamples), **the exact recorder write path** (Float32 tap chunks → AAC AVAudioFile → playable m4a readable by WindowedAudioLoader, ~36 KB for 3 s), compress-in-place swap keeps sidecars + duration and skips already-compressed files |
 | `ThinkTagFilterTests` / `SummaryParsingRobustnessTests` | `<think>` filtering incl. tags split across chunks, unclosed blocks, bare `<` passthrough; full summarize path with think-block + prose-wrapped JSON via mocked SSE |

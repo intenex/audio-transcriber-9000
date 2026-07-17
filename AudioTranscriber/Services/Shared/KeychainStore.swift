@@ -10,7 +10,11 @@ enum SecretKey: String, CaseIterable {
 
 protocol SecretsStore: AnyObject {
     func get(_ key: SecretKey) -> String?
-    func set(_ value: String, for key: SecretKey)
+    /// Persists a non-empty secret; empty/whitespace input is a no-op.
+    /// Removal is only ever explicit via `delete(_:)` — a transiently empty
+    /// text field must never be able to destroy a stored key.
+    @discardableResult
+    func set(_ value: String, for key: SecretKey) -> Bool
     func delete(_ key: SecretKey)
 }
 
@@ -22,13 +26,17 @@ extension SecretsStore {
     }
 }
 
-/// Keychain-backed secrets storage (kSecClassGenericPassword, service = bundle id).
+/// Keychain-backed secrets storage (kSecClassGenericPassword).
+/// The service string is a fixed constant, NOT Bundle.main.bundleIdentifier:
+/// the iOS app has a different bundle id, and synced keys are only findable
+/// when both platforms query the same service. (Identical to the Mac bundle
+/// id, so existing items keep resolving.)
 final class KeychainStore: SecretsStore {
     static let shared = KeychainStore()
 
     private let service: String
 
-    init(service: String = Bundle.main.bundleIdentifier ?? "com.audiortranscriber.AudioTranscriber") {
+    init(service: String = "com.audiortranscriber.AudioTranscriber") {
         self.service = service
     }
 
@@ -43,23 +51,22 @@ final class KeychainStore: SecretsStore {
         return String(data: data, encoding: .utf8)
     }
 
-    func set(_ value: String, for key: SecretKey) {
+    @discardableResult
+    func set(_ value: String, for key: SecretKey) -> Bool {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            delete(key)
-            return
-        }
+        guard !trimmed.isEmpty else { return true }
         let data = Data(trimmed.utf8)
 
         let query = baseQuery(for: key)
         let update: [String: Any] = [kSecValueData as String: data]
-        let status = SecItemUpdate(query as CFDictionary, update as CFDictionary)
+        var status = SecItemUpdate(query as CFDictionary, update as CFDictionary)
         if status == errSecItemNotFound {
             var add = query
             add[kSecValueData as String] = data
             add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
-            SecItemAdd(add as CFDictionary, nil)
+            status = SecItemAdd(add as CFDictionary, nil)
         }
+        return status == errSecSuccess
     }
 
     func delete(_ key: SecretKey) {
@@ -84,8 +91,10 @@ final class InMemorySecretsStore: SecretsStore {
     }
 
     func get(_ key: SecretKey) -> String? { storage[key] }
-    func set(_ value: String, for key: SecretKey) {
-        if value.isEmpty { storage[key] = nil } else { storage[key] = value }
+    @discardableResult
+    func set(_ value: String, for key: SecretKey) -> Bool {
+        if !value.isEmpty { storage[key] = value }
+        return true
     }
     func delete(_ key: SecretKey) { storage[key] = nil }
 }
