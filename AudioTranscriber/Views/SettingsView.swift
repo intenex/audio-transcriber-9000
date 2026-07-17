@@ -6,69 +6,348 @@ struct SettingsView: View {
         TabView {
             GeneralSettingsTab()
                 .tabItem { Label("General", systemImage: "gearshape") }
+            TranscriptionSettingsTab()
+                .tabItem { Label("Transcription", systemImage: "waveform.badge.mic") }
+            AIChatSettingsTab()
+                .tabItem { Label("AI Chat", systemImage: "bubble.left.and.bubble.right") }
+            SpeakersSettingsTab()
+                .tabItem { Label("Speakers", systemImage: "person.wave.2") }
             StorageSettingsTab()
                 .tabItem { Label("Storage", systemImage: "folder") }
-            AISettingsTab()
-                .tabItem { Label("AI", systemImage: "cpu.fill") }
         }
-        .frame(width: 460, height: 380)
+        .frame(width: 560, height: 480)
+    }
+}
+
+// MARK: - Keychain-backed secure field
+
+struct KeychainSecureField: View {
+    let label: String
+    let key: SecretKey
+    var prompt: String = "Paste your API key"
+
+    @State private var value = ""
+    @State private var isSaved = false
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            SecureField(prompt, text: $value)
+                .textContentType(.password)
+                .focused($focused)
+                .onSubmit { save() }
+            if isSaved && !value.isEmpty {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(AppTheme.success)
+                    .help("Saved in Keychain")
+            }
+            if !value.isEmpty {
+                Button(action: {
+                    value = ""
+                    KeychainStore.shared.delete(key)
+                    isSaved = false
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Remove key")
+            }
+        }
+        .onAppear {
+            value = KeychainStore.shared.get(key) ?? ""
+            isSaved = !value.isEmpty
+        }
+        .onChange(of: focused) { _, isFocused in
+            if !isFocused { save() }
+        }
+    }
+
+    private func save() {
+        KeychainStore.shared.set(value, for: key)
+        isSaved = KeychainStore.shared.has(key)
     }
 }
 
 // MARK: - General Tab
 
 struct GeneralSettingsTab: View {
-    @AppStorage("huggingFaceToken") private var hfToken = ""
-    @AppStorage("whisperModel") private var whisperModel = "large-v3"
-
-    private let models = ["tiny", "base", "small", "medium", "large-v2", "large-v3"]
+    @AppStorage("defaultTranscriptionEngine") private var defaultEngine = TranscriptionEngineKind.local.rawValue
+    @AppStorage("confirmCloudTranscription") private var confirmCloud = true
+    @AppStorage("autoSummarize") private var autoSummarize = true
+    @AppStorage("autoTranscribeNewRecordings") private var autoTranscribe = false
+    @AppStorage("liveTranscriptionPreview") private var livePreview = true
 
     var body: some View {
         Form {
             Section {
-                SecureField("Paste your token here", text: $hfToken)
-                    .textContentType(.password)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Required for speaker diarization (identifying who said what).")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    HStack(spacing: 4) {
-                        Image(systemName: "info.circle")
-                            .font(.caption2)
-                        Text("Get a token at huggingface.co/settings/tokens, then accept model terms at:")
-                            .font(.caption)
+                Picker("Default engine", selection: $defaultEngine) {
+                    ForEach(TranscriptionEngineKind.allCases) { kind in
+                        Text(kind.displayName).tag(kind.rawValue)
                     }
-                    .foregroundStyle(.tertiary)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("pyannote/speaker-diarization-community-1")
-                        Text("pyannote/segmentation-3.0")
-                    }
-                    .font(.caption.monospaced())
-                    .foregroundStyle(AppTheme.accent)
                 }
+                Toggle("Confirm before cloud transcription (shows cost estimate)", isOn: $confirmCloud)
+                Toggle("Automatically transcribe new recordings", isOn: $autoTranscribe)
             } header: {
-                Label("HuggingFace Token", systemImage: "key.fill")
+                Label("Transcription", systemImage: "waveform.badge.mic")
             }
 
             Section {
-                Picker("Model", selection: $whisperModel) {
-                    ForEach(models, id: \.self) { model in
-                        Text(model).tag(model)
-                    }
-                }
-                .pickerStyle(.menu)
-
-                Text("Larger models are more accurate but slower. large-v3 is recommended for 64GB+ RAM.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Toggle("Generate summary after transcription", isOn: $autoSummarize)
+                Toggle("Live transcript preview while recording", isOn: $livePreview)
             } header: {
-                Label("Whisper Model", systemImage: "cpu")
+                Label("Behavior", systemImage: "sparkles")
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+// MARK: - Transcription Tab
+
+struct TranscriptionSettingsTab: View {
+    @Environment(ModelManager.self) private var modelManager
+
+    var body: some View {
+        Form {
+            Section {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(modelManager.allReady ? AppTheme.success : AppTheme.warning)
+                        .frame(width: 10, height: 10)
+                    Text(modelManager.summaryText)
+                        .font(.subheadline)
+                    Spacer()
+                    if !modelManager.allReady {
+                        Button("Download") {
+                            Task { await modelManager.downloadAll() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(AppTheme.accent)
+                        .disabled(isDownloading)
+                    } else {
+                        Button("Remove") { modelManager.removeAll() }
+                            .buttonStyle(.bordered)
+                    }
+                }
+                Text("Parakeet v3 speech recognition + pyannote speaker identification, running fully on-device via the Neural Engine. Free, private, and works offline once downloaded.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Label("On-Device Models", systemImage: "cpu")
+            }
+
+            Section {
+                KeychainSecureField(label: "OpenAI API Key", key: .openAI, prompt: "sk-…")
+                Text("Uses gpt-4o-transcribe-diarize (≈ $0.006/min). Audio is compressed to 16 kHz mono AAC before upload. Enrolled speaker voices are sent as reference clips so speakers are named automatically.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Label("OpenAI", systemImage: "key.fill")
+            }
+
+            Section {
+                KeychainSecureField(label: "AssemblyAI API Key", key: .assemblyAI, prompt: "API key")
+                Text("Best for very long recordings — files upload once (up to 5 GB) with no splitting. ≈ $0.005/min with speaker labels.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Label("AssemblyAI", systemImage: "key.fill")
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear { modelManager.refreshStatus() }
+    }
+
+    private var isDownloading: Bool {
+        if case .downloading = modelManager.asrState { return true }
+        if case .downloading = modelManager.diarizerState { return true }
+        return false
+    }
+}
+
+// MARK: - AI Chat Tab
+
+struct AIChatSettingsTab: View {
+    @Environment(ChatService.self) private var chatService
+    @AppStorage("chatProviderID") private var selectedProvider = ""
+    @AppStorage("miniMaxModel") private var miniMaxModel = "MiniMax-M2"
+    @AppStorage("openAIChatModel") private var openAIChatModel = "gpt-4o-mini"
+    @AppStorage("customChatBaseURL") private var customBaseURL = ""
+    @AppStorage("customChatModel") private var customModel = ""
+    @AppStorage("llmModel") private var localModel = "mlx-community/Mistral-7B-Instruct-v0.3-4bit"
+
+    var body: some View {
+        Form {
+            Section {
+                Picker("Provider", selection: $selectedProvider) {
+                    Text("Automatic").tag("")
+                    ForEach(ChatProviderID.allCases) { id in
+                        Text(id.displayName).tag(id.rawValue)
+                    }
+                }
+                Text("Automatic uses MiniMax when its key is set, then OpenAI, then the local model. Powers chat, summaries, and auto-naming.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Label("Chat Provider", systemImage: "bubble.left.and.bubble.right")
+            }
+
+            Section {
+                KeychainSecureField(label: "MiniMax API Key", key: .miniMax)
+                TextField("Model", text: $miniMaxModel)
+                    .font(.subheadline.monospaced())
+                Text("International endpoint (api.minimax.io).")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            } header: {
+                Label("MiniMax", systemImage: "key.fill")
+            }
+
+            Section {
+                TextField("Model", text: $openAIChatModel)
+                    .font(.subheadline.monospaced())
+                Text("Uses the OpenAI API key from the Transcription tab.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            } header: {
+                Label("OpenAI", systemImage: "key.fill")
+            }
+
+            Section {
+                TextField("Base URL", text: $customBaseURL, prompt: Text("https://api.example.com/v1"))
+                    .font(.subheadline.monospaced())
+                KeychainSecureField(label: "API Key", key: .custom)
+                TextField("Model", text: $customModel, prompt: Text("model-name"))
+                    .font(.subheadline.monospaced())
+                Text("Any OpenAI-compatible chat completions endpoint.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            } header: {
+                Label("Custom Endpoint", systemImage: "network")
+            }
+
+            Section {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(chatService.isLocalMLXAvailable ? AppTheme.success : AppTheme.recording)
+                        .frame(width: 10, height: 10)
+                    Text(chatService.isLocalMLXAvailable ? "Available" : "Not available")
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                    Button(chatService.isCheckingLocal ? "Checking…" : "Check") {
+                        Task { await chatService.checkLocalAvailability() }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(chatService.isCheckingLocal)
+                }
+                TextField("Model", text: $localModel)
+                    .font(.subheadline.monospaced())
+                if !chatService.isLocalMLXAvailable {
+                    Text("Install with: conda run -n transcriber pip install mlx-lm")
+                        .font(.caption.monospaced())
+                        .foregroundStyle(AppTheme.accent)
+                        .textSelection(.enabled)
+                }
+            } header: {
+                Label("Local (MLX)", systemImage: "cpu.fill")
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear {
+            Task { await chatService.checkLocalAvailability() }
+        }
+    }
+}
+
+// MARK: - Speakers Tab
+
+struct SpeakersSettingsTab: View {
+    @Environment(SpeakerLibraryStore.self) private var speakerLibrary
+    @State private var playingClipURL: URL? = nil
+    @State private var clipPlayer = ClipPlayer()
+
+    var body: some View {
+        Form {
+            Section {
+                if speakerLibrary.speakers.isEmpty {
+                    Text("No voices enrolled yet. Name a speaker in any transcript and leave “Remember this voice” on — they'll be recognized automatically in future recordings.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(speakerLibrary.speakers) { speaker in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(speaker.name)
+                                    .font(.subheadline.weight(.medium))
+                                Text("Seen in \(speaker.recordingIDs.count) recording\(speaker.recordingIDs.count == 1 ? "" : "s") · \(speaker.clips.count) voice clip\(speaker.clips.count == 1 ? "" : "s")")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            Spacer()
+                            if let clip = speaker.clips.first {
+                                Button(action: { clipPlayer.togglePlay(url: speakerLibrary.clipURL(for: clip)) }) {
+                                    Image(systemName: "play.circle")
+                                }
+                                .buttonStyle(.plain)
+                                .help("Play voice sample")
+                            }
+                            Button(role: .destructive, action: { speakerLibrary.delete(speaker) }) {
+                                Image(systemName: "trash")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Forget this voice")
+                        }
+                    }
+                }
+            } header: {
+                Label("Enrolled Voices", systemImage: "person.wave.2")
+            }
+
+            Section {
+                LabeledContent("Match sensitivity") {
+                    Slider(value: matchThresholdBinding, in: 0.5...0.9, step: 0.05)
+                        .frame(width: 200)
+                }
+                Text("Threshold \(String(format: "%.2f", speakerLibrary.autoMatchThreshold)) — higher requires a closer voice match before auto-naming a speaker.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            } header: {
+                Label("Recognition", systemImage: "waveform.and.person.filled")
+            }
+
+            Section {
+                Text("Voice profiles are stored only on this Mac. Reference clips are sent to a cloud provider only when you choose that provider for transcription, to label speakers automatically.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var matchThresholdBinding: Binding<Double> {
+        Binding(
+            get: { Double(speakerLibrary.autoMatchThreshold) },
+            set: { speakerLibrary.autoMatchThreshold = Float($0) }
+        )
+    }
+}
+
+/// Tiny standalone player for voice-clip previews in Settings.
+import AVFoundation
+@Observable
+final class ClipPlayer {
+    private var player: AVAudioPlayer? = nil
+
+    func togglePlay(url: URL) {
+        if let player, player.isPlaying {
+            player.stop()
+            self.player = nil
+            return
+        }
+        player = try? AVAudioPlayer(contentsOf: url)
+        player?.play()
     }
 }
 
@@ -118,11 +397,7 @@ struct StorageSettingsTab: View {
 
             Section {
                 Button("Open Storage Folder") {
-                    let path = storageDirectory.isEmpty
-                        ? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-                            .appendingPathComponent("AudioTranscriber").path
-                        : storageDirectory
-                    NSWorkspace.shared.open(URL(fileURLWithPath: path))
+                    NSWorkspace.shared.open(store.storageDirectory)
                 }
             }
         }
@@ -145,71 +420,6 @@ struct StorageSettingsTab: View {
         panel.message = "Choose where to save recordings"
         if panel.runModal() == .OK, let url = panel.url {
             storageDirectory = url.path
-        }
-    }
-}
-
-// MARK: - AI Tab
-
-struct AISettingsTab: View {
-    @Environment(LLMService.self) private var llmService
-    @AppStorage("llmModel") private var selectedModel = "mlx-community/Mistral-7B-Instruct-v0.3-4bit"
-
-    var body: some View {
-        Form {
-            Section {
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(llmService.isAvailable ? AppTheme.success : AppTheme.recording)
-                        .frame(width: 10, height: 10)
-                    Text(llmService.isAvailable ? "Available" : "Not Available")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(llmService.isAvailable ? AppTheme.success : .secondary)
-                    Spacer()
-                    Button(llmService.isChecking ? "Checking..." : "Check") {
-                        Task { await llmService.checkAvailability() }
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(llmService.isChecking)
-                }
-
-                if !llmService.isAvailable {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("mlx-lm is required for AI features (summarization, chat, smart search).")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text("Install:")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                        Text("conda run -n transcriber pip install mlx-lm")
-                            .font(.caption.monospaced())
-                            .foregroundStyle(AppTheme.accent)
-                            .textSelection(.enabled)
-                        Text("The model downloads automatically (~4GB) on first use.")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-            } header: {
-                Label("mlx-lm Status", systemImage: "cpu.fill")
-            }
-
-            Section {
-                TextField("Model", text: $selectedModel)
-                    .font(.subheadline.monospaced())
-                Text("Default: mlx-community/Mistral-7B-Instruct-v0.3-4bit (~4GB)")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                Text("Browse models at huggingface.co/mlx-community")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            } header: {
-                Label("Model", systemImage: "cpu")
-            }
-        }
-        .formStyle(.grouped)
-        .onAppear {
-            Task { await llmService.checkAvailability() }
         }
     }
 }

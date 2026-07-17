@@ -16,7 +16,7 @@ struct ContentView: View {
             RecordingListView(selectedRecordingID: $selectedRecordingID, showGlobalChat: $showGlobalChat)
         } detail: {
             if showGlobalChat {
-                GlobalChatView()
+                ChatSessionView(context: .global)
             } else if let recording = selectedRecording {
                 TranscriptionView(recording: recording)
             } else {

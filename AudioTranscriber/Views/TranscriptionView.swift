@@ -12,7 +12,7 @@ struct TranscriptionView: View {
     @Environment(RecordingStore.self) private var store
     @Environment(TranscriptionService.self) private var transcriptionService
     @Environment(AudioRecorder.self) private var audioRecorder
-    @Environment(LLMService.self) private var llmService
+    @Environment(ChatService.self) private var chatService
 
     @State private var markdownContent: String? = nil
     @State private var segments: [TranscriptionSegment]? = nil
@@ -71,7 +71,7 @@ struct TranscriptionView: View {
                     case .summary:
                         summaryTabContent
                     case .chat:
-                        ChatView(recording: recording)
+                        ChatSessionView(context: .recording(recording))
                     }
                 case .failed:
                     failedView
@@ -688,7 +688,7 @@ struct TranscriptionView: View {
                     }
 
                     // Regenerate
-                    if llmService.isAvailable {
+                    if chatService.isActiveProviderReady {
                         Button(action: { Task { await regenerateSummary() } }) {
                             Label("Regenerate Summary", systemImage: "arrow.counterclockwise")
                                 .font(.subheadline)
@@ -711,7 +711,7 @@ struct TranscriptionView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
-        } else if llmService.isAvailable {
+        } else if chatService.isActiveProviderReady {
             VStack(spacing: 16) {
                 Image(systemName: "doc.text.magnifyingglass")
                     .font(.system(size: 40))
@@ -818,7 +818,8 @@ struct TranscriptionView: View {
         defer { isRegeneratingSummary = false }
 
         do {
-            let summary = try await SummarizationService.summarize(transcript: content, llm: llmService)
+            let summary = try await SummarizationService.summarize(
+                transcript: content, provider: chatService.activeProvider)
             SummarizationService.saveSummary(summary, for: recording)
             await MainActor.run { loadedSummary = summary }
 

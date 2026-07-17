@@ -2,7 +2,9 @@ import Foundation
 
 struct SummarizationService {
 
-    static func summarize(transcript: String, llm: LLMService) async throws -> RecordingSummary {
+    static func summarize(transcript: String, provider: any ChatProvider) async throws -> RecordingSummary {
+        // Leave room for the instructions inside the provider's context budget.
+        let budget = max(2_000, provider.contextCharacterBudget - 1_000)
         let prompt = """
         Given this transcript, provide a JSON response with exactly these fields:
         - "summary": A concise 2-3 paragraph summary of the key points discussed
@@ -12,12 +14,12 @@ struct SummarizationService {
         Respond ONLY with valid JSON, no markdown formatting or code blocks.
 
         Transcript:
-        \(transcript.prefix(8000))
+        \(transcript.prefix(budget))
         """
 
         let system = "You are a helpful assistant that analyzes meeting transcripts. Always respond with valid JSON only."
 
-        let response = try await llm.generate(prompt: prompt, system: system)
+        let response = try await provider.generate(prompt: prompt, system: system)
         return try parseSummaryJSON(response)
     }
 

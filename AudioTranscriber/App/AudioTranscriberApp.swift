@@ -5,7 +5,7 @@ struct AudioTranscriberApp: App {
     @State private var recordingStore = RecordingStore()
     @State private var audioRecorder = AudioRecorder()
     @State private var transcriptionService = TranscriptionService()
-    @State private var llmService = LLMService()
+    @State private var chatService = ChatService()
     @State private var modelManager = ModelManager()
     @State private var speakerLibrary = SpeakerLibraryStore()
 
@@ -15,14 +15,14 @@ struct AudioTranscriberApp: App {
                 .environment(recordingStore)
                 .environment(audioRecorder)
                 .environment(transcriptionService)
-                .environment(llmService)
+                .environment(chatService)
                 .environment(modelManager)
                 .environment(speakerLibrary)
                 .onAppear {
                     recordingStore.load()
                     speakerLibrary.attach(storageDirectory: recordingStore.storageDirectory)
                     audioRecorder.attach(store: recordingStore)
-                    transcriptionService.attach(store: recordingStore, llmService: llmService,
+                    transcriptionService.attach(store: recordingStore, chatService: chatService,
                                                 speakerLibrary: speakerLibrary)
                     audioRecorder.onNewRecording = { id in
                         if UserDefaults.standard.bool(forKey: "autoTranscribeNewRecordings") {
@@ -31,7 +31,7 @@ struct AudioTranscriberApp: App {
                     }
                     audioRecorder.requestMicPermission()
                     modelManager.refreshStatus()
-                    Task { await llmService.checkAvailability() }
+                    Task { await chatService.checkLocalAvailability() }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                     recordingStore.saveNow()
@@ -55,7 +55,7 @@ struct AudioTranscriberApp: App {
                 .environment(recordingStore)
                 .environment(audioRecorder)
                 .environment(transcriptionService)
-                .environment(llmService)
+                .environment(chatService)
                 .environment(modelManager)
                 .environment(speakerLibrary)
         }

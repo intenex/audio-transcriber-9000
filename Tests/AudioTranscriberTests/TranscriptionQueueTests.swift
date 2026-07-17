@@ -50,7 +50,7 @@ final class TranscriptionQueueTests: XCTestCase {
                                defaults: UserDefaults(suiteName: "QueueTests-\(UUID().uuidString)")!)
         store.load()
         service = TranscriptionService()
-        service.attach(store: store, llmService: nil)
+        service.attach(store: store, chatService: nil)
     }
 
     override func tearDown() async throws {

@@ -30,7 +30,7 @@ final class TranscriptionService {
 
     // Wiring
     private weak var store: RecordingStore?
-    private var llmService: LLMService? = nil
+    private var chatService: ChatService? = nil
     private var speakerLibrary: SpeakerLibraryStore? = nil
 
     // Engines: local engine is retained so models stay loaded between jobs.
@@ -44,9 +44,9 @@ final class TranscriptionService {
     private var sleepGuard: SleepGuard? = nil
     private var didRequestNotificationAuth = false
 
-    func attach(store: RecordingStore, llmService: LLMService?, speakerLibrary: SpeakerLibraryStore? = nil) {
+    func attach(store: RecordingStore, chatService: ChatService?, speakerLibrary: SpeakerLibraryStore? = nil) {
         self.store = store
-        self.llmService = llmService
+        self.chatService = chatService
         self.speakerLibrary = speakerLibrary
     }
 
@@ -251,14 +251,16 @@ final class TranscriptionService {
     }
 
     private func autoSummarize(markdown: String, recordingID: UUID) async {
-        guard let llmService else { return }
-        if !llmService.isAvailable {
-            await llmService.checkAvailability()
+        guard let chatService else { return }
+        if chatService.activeProvider.id == .localMLX, !chatService.isLocalMLXAvailable {
+            await chatService.checkLocalAvailability()
         }
-        guard llmService.isAvailable, let store, let recording = store.recording(with: recordingID) else { return }
+        guard chatService.isActiveProviderReady,
+              let store, let recording = store.recording(with: recordingID) else { return }
 
         do {
-            let summary = try await SummarizationService.summarize(transcript: markdown, llm: llmService)
+            let summary = try await SummarizationService.summarize(
+                transcript: markdown, provider: chatService.activeProvider)
             SummarizationService.saveSummary(summary, for: recording)
             if store.recording(with: recordingID)?.name == nil {
                 store.update(recordingID) { $0.name = summary.generatedName }
