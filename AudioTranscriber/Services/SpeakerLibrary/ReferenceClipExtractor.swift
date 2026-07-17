@@ -15,6 +15,21 @@ enum ReferenceClipExtractor {
     static let targetTotalSeconds = 15.0
     static let maxClips = 3
 
+    /// Minimum RMS for a clip to count as actual speech. Anything quieter is
+    /// silence/room noise — enrolling it poisons recognition and produces the
+    /// "empty voice clip" symptom.
+    static let minimumSpeechRMS: Float = 0.004
+
+    static func rms(_ samples: [Float]) -> Float {
+        guard !samples.isEmpty else { return 0 }
+        let sumOfSquares = samples.reduce(Float(0)) { $0 + $1 * $1 }
+        return sqrt(sumOfSquares / Float(samples.count))
+    }
+
+    static func isLikelySpeech(_ samples: [Float]) -> Bool {
+        rms(samples) >= minimumSpeechRMS
+    }
+
     /// Pure candidate selection: the speaker's longest segments that don't
     /// overlap any other speaker's speech, trimmed to 10s, 8-15s total, max 3.
     /// Falls back to the 2 longest segments when nothing clean qualifies.

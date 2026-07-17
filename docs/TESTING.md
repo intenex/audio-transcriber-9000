@@ -18,6 +18,8 @@ What exists, how to run it, and what "verified" means in this project. See [DEVE
 | `SharedUtilsTests` | SSEParser (chunk boundaries, CRLF, multi-line data, [DONE]), MultipartFormData framing, KeychainStore round-trip (isolated service name) |
 | `WindowedAudioLoaderTests` | resample length/energy on synthetic WAVs (48 k mono, 44.1 k stereo mixdown, 16 k passthrough), near-empty rejection, **equivalence with FluidAudio's loader on the real fixture** (length ±0.5 %, RMS ±10 %) |
 | `RecordingFormatTests` / `CompressInPlaceTests` | format settings mapping (AAC caps at 48 k, never upsamples), **the exact recorder write path** (Float32 tap chunks → AAC AVAudioFile → playable m4a readable by WindowedAudioLoader, ~36 KB for 3 s), compress-in-place swap keeps sidecars + duration and skips already-compressed files |
+| `ThinkTagFilterTests` / `SummaryParsingRobustnessTests` | `<think>` filtering incl. tags split across chunks, unclosed blocks, bare `<` passthrough; full summarize path with think-block + prose-wrapped JSON via mocked SSE |
+| `LiveFixVerificationTests` (gated) | Exact bug repros on real data: the quirky 2 h WAV compresses fully (duration-matched — old AVAssetReader path truncated at ~150 s), and a live MiniMax-M3 summary on a real transcript (real Keychain key; think-block-free JSON) |
 | `AudioRecorderTests` / `TranscriptionServiceTests` | model basics, formatter output, service initial state |
 
 **Integration — gated by a marker file, uses real models (~1.5 GB, cached after first run):**

@@ -33,5 +33,15 @@ struct ContentView: View {
         } message: {
             Text(transcriptionService.errorMessage ?? "")
         }
+        .alert("Library Error", isPresented: .constant(store.errorMessage != nil)) {
+            Button("OK") { store.errorMessage = nil }
+        } message: {
+            Text(store.errorMessage ?? "")
+        }
+        .alert("Done", isPresented: .constant(store.infoMessage != nil)) {
+            Button("OK") { store.infoMessage = nil }
+        } message: {
+            Text(store.infoMessage ?? "")
+        }
     }
 }

@@ -283,8 +283,17 @@ struct RecordingListView: View {
         }
 
         if RecordingStore.compressibleExtensions.contains(recording.fileURL.pathExtension.lowercased()) {
-            Button {
-                Task { await store.compressAudio(recording) }
+            Menu {
+                Button {
+                    Task { await store.compressAudio(recording, spec: .storage) }
+                } label: {
+                    Text("High Quality — 96 kbps (\(compressEstimate(.storage, for: recording)))")
+                }
+                Button {
+                    Task { await store.compressAudio(recording, spec: .storageCompact) }
+                } label: {
+                    Text("Compact — 48 kbps (\(compressEstimate(.storageCompact, for: recording)))")
+                }
             } label: {
                 Label("Compress Audio (AAC)", systemImage: "arrow.down.circle")
             }
@@ -304,6 +313,11 @@ struct RecordingListView: View {
         } label: {
             Label("Delete", systemImage: "trash")
         }
+    }
+
+    private func compressEstimate(_ spec: AudioCompressor.Spec, for recording: Recording) -> String {
+        let bytes = Int64(spec.estimatedBytes(forSeconds: recording.duration))
+        return "~" + ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 
     // MARK: - Expansion persistence
@@ -373,6 +387,7 @@ extension UUID: @retroactive Identifiable {
 
 struct RecordingRow: View {
     let recording: Recording
+    @Environment(RecordingStore.self) private var store
     @Environment(AudioRecorder.self) private var audioRecorder
     @Environment(TranscriptionService.self) private var transcriptionService
 
@@ -419,6 +434,23 @@ struct RecordingRow: View {
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(.quaternary.opacity(0.5), in: Capsule())
+
+                    if let progress = store.compressingProgress[recording.id] {
+                        HStack(spacing: 4) {
+                            ProgressView(value: progress)
+                                .progressViewStyle(.linear)
+                                .frame(width: 44)
+                            Text("\(Int(progress * 100))%")
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(AppTheme.processing)
+                        }
+                        .help("Compressing audio…")
+                    } else {
+                        Text(recording.formatAndSizeLabel)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
 
                     statusBadge
                 }

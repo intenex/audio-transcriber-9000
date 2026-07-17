@@ -21,6 +21,7 @@ struct RecordingManifest: Codable {
         var name: String?
         var category: String?
         var engineUsed: String?
+        var fileSizeBytes: Int64?
     }
 
     init(schemaVersion: Int = RecordingManifest.currentSchemaVersion,
@@ -47,7 +48,8 @@ extension RecordingManifest.Entry {
             status: recording.status,
             name: recording.name,
             category: recording.category,
-            engineUsed: recording.engineUsed
+            engineUsed: recording.engineUsed,
+            fileSizeBytes: recording.fileSizeBytes
         )
     }
 
@@ -68,7 +70,8 @@ extension RecordingManifest.Entry {
         return Recording(
             id: id, fileURL: url, date: date, duration: duration,
             transcriptionURL: transcriptionURL, status: status,
-            name: name, category: category, engineUsed: engineUsed
+            name: name, category: category, engineUsed: engineUsed,
+            fileSizeBytes: fileSizeBytes
         )
     }
 }

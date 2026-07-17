@@ -40,10 +40,13 @@ struct Recording: Identifiable, Codable {
     /// Human-readable engine/model that produced the transcript, e.g.
     /// "On-Device · Parakeet v3". Optional for pre-existing data.
     var engineUsed: String?
+    /// Cached audio file size (refreshed at load/insert/compress).
+    var fileSizeBytes: Int64?
 
     init(id: UUID = UUID(), fileURL: URL, date: Date = .now, duration: TimeInterval = 0,
          transcriptionURL: URL? = nil, status: TranscriptionStatus = .pending,
-         name: String? = nil, category: String? = nil, engineUsed: String? = nil) {
+         name: String? = nil, category: String? = nil, engineUsed: String? = nil,
+         fileSizeBytes: Int64? = nil) {
         self.id = id
         self.fileURL = fileURL
         self.date = date
@@ -53,6 +56,14 @@ struct Recording: Identifiable, Codable {
         self.name = name
         self.category = category
         self.engineUsed = engineUsed
+        self.fileSizeBytes = fileSizeBytes
+    }
+
+    /// "M4A · 40 MB" style label for list rows and headers.
+    var formatAndSizeLabel: String {
+        let ext = fileURL.pathExtension.uppercased()
+        guard let bytes = fileSizeBytes, bytes > 0 else { return ext }
+        return "\(ext) · \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file))"
     }
 
     var displayName: String {

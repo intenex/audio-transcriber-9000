@@ -119,6 +119,36 @@ final class SpeakerLibraryStore {
         directory.appendingPathComponent(clip.file)
     }
 
+    /// Removes reference clips that contain no actual speech (silence/room
+    /// noise) — these came from a pre-fix extraction bug and poison cloud
+    /// speaker recognition. Returns the number of clips removed.
+    func pruneSilentClips() async -> Int {
+        var removed = 0
+        for speakerIndex in speakers.indices.reversed() {
+            var keptClips: [EnrolledSpeaker.Clip] = []
+            for clip in speakers[speakerIndex].clips {
+                let url = clipURL(for: clip)
+                guard FileManager.default.fileExists(atPath: url.path) else {
+                    removed += 1
+                    continue   // missing file: drop the entry
+                }
+                let isSpeech = await Task.detached(priority: .userInitiated) { () -> Bool in
+                    guard let samples = try? WindowedAudioLoader.load16kMono(from: url) else { return false }
+                    return ReferenceClipExtractor.isLikelySpeech(samples)
+                }.value
+                if isSpeech {
+                    keptClips.append(clip)
+                } else {
+                    try? FileManager.default.removeItem(at: url)
+                    removed += 1
+                }
+            }
+            speakers[speakerIndex].clips = keptClips
+        }
+        if removed > 0 { save() }
+        return removed
+    }
+
     /// Best reference clips for cloud known-speaker hints, ranked by how many
     /// recordings the speaker has been seen in, then recency.
     func referenceCandidates(limit: Int) -> [KnownSpeakerReference] {

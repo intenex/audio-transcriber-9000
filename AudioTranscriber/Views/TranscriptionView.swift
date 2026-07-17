@@ -28,6 +28,7 @@ struct TranscriptionView: View {
     @State private var editName = ""
     @State private var loadedSummary: RecordingSummary? = nil
     @State private var isRegeneratingSummary = false
+    @State private var summaryError: String? = nil
     @State private var transcriptSearchQuery = ""
     @State private var speakerNames: [String: String] = [:]
     @State private var editingSpeakerID: String? = nil
@@ -167,6 +168,9 @@ struct TranscriptionView: View {
                     Label(recording.durationString, systemImage: "clock")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    Text(recording.formatAndSizeLabel)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
                     statusPill
                     if let engine = recording.engineUsed {
                         Label(engine, systemImage: "cpu")
@@ -788,11 +792,16 @@ struct TranscriptionView: View {
             let speakerUUID = UUID()
 
             for (index, candidate) in candidates.enumerated() {
-                // Embedding from raw samples
-                if let samples = try? ReferenceClipExtractor.samples16k(
+                // Read the samples once; they gate everything downstream.
+                guard let samples = try? ReferenceClipExtractor.samples16k(
                     from: audioURL, start: candidate.start, end: candidate.end),
-                   samples.count > 16_000,   // at least 1s
-                   let embedding = try? await engine.extractEmbedding(samples: samples) {
+                    samples.count > 16_000 else { continue }   // at least 1s
+
+                // Silence gate: never enroll clips/embeddings that are just
+                // room noise — silent references poison recognition.
+                guard ReferenceClipExtractor.isLikelySpeech(samples) else { continue }
+
+                if let embedding = try? await engine.extractEmbedding(samples: samples) {
                     embeddings.append(embedding)
                 }
 
@@ -803,13 +812,18 @@ struct TranscriptionView: View {
                 let range = CMTimeRange(
                     start: CMTime(seconds: candidate.start, preferredTimescale: 600),
                     end: CMTime(seconds: candidate.end, preferredTimescale: 600))
-                if (try? await AudioCompressor.compress(source: audioURL, timeRange: range, to: clipURL)) != nil {
+                if (try? await AudioCompressor.compress(source: audioURL, timeRange: range, to: clipURL)) != nil,
+                   // Verify the written clip actually contains the speech.
+                   let written = try? WindowedAudioLoader.load16kMono(from: clipURL),
+                   ReferenceClipExtractor.isLikelySpeech(written) {
                     clips.append(EnrolledSpeaker.Clip(
                         file: "clips/\(speakerUUID.uuidString)/clip-\(index + 1).m4a",
                         duration: candidate.duration,
                         sourceRecordingID: recordingID,
                         start: candidate.start,
                         end: candidate.end))
+                } else {
+                    try? FileManager.default.removeItem(at: clipURL)
                 }
             }
 
@@ -958,9 +972,12 @@ struct TranscriptionView: View {
         } else if isRegeneratingSummary {
             VStack(spacing: 12) {
                 ProgressView()
-                Text("Generating summary...")
+                Text("Summarizing with \(chatService.activeProvider.modelIdentity)…")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                Text("Long recordings can take a few minutes.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
             }
         } else if chatService.isActiveProviderReady {
             VStack(spacing: 16) {
@@ -970,12 +987,25 @@ struct TranscriptionView: View {
                 Text("No summary yet")
                     .font(.headline)
                     .foregroundStyle(.secondary)
+                if let summaryError {
+                    VStack(spacing: 6) {
+                        Label(summaryError, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.warning)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: 420)
+                            .textSelection(.enabled)
+                    }
+                }
                 Button(action: { Task { await regenerateSummary() } }) {
-                    Label("Generate Summary", systemImage: "sparkles")
+                    Label(summaryError == nil ? "Generate Summary" : "Try Again", systemImage: "sparkles")
                         .font(.subheadline.weight(.semibold))
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(AppTheme.accent)
+                Text("Using \(chatService.activeProvider.modelIdentity)")
+                    .font(.caption2)
+                    .foregroundStyle(.quaternary)
             }
         } else {
             VStack(spacing: 16) {
@@ -1083,6 +1113,7 @@ struct TranscriptionView: View {
     private func regenerateSummary() async {
         guard let content = markdownContent else { return }
         isRegeneratingSummary = true
+        summaryError = nil
         defer { isRegeneratingSummary = false }
 
         do {
@@ -1101,7 +1132,7 @@ struct TranscriptionView: View {
                 }
             }
         } catch {
-            // Silently fail - user can retry
+            await MainActor.run { summaryError = error.localizedDescription }
         }
     }
 

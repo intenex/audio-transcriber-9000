@@ -76,6 +76,11 @@ final class RecordingStore {
             loaded[idx].status = hasCheckpoint ? .partial : .pending
         }
 
+        // Fill in missing file sizes (cheap stat calls, cached in the manifest).
+        for idx in loaded.indices where loaded[idx].fileSizeBytes == nil {
+            loaded[idx].fileSizeBytes = Self.fileSize(of: loaded[idx].fileURL)
+        }
+
         recordings = loaded.sorted { $0.date > $1.date }
         categories = loadedCategories
         saveNow()
@@ -153,10 +158,14 @@ final class RecordingStore {
     // MARK: - Mutations
 
     func insert(_ recording: Recording) {
-        recordings.insert(recording, at: 0)
+        var entry = recording
+        if entry.fileSizeBytes == nil {
+            entry.fileSizeBytes = Self.fileSize(of: entry.fileURL)
+        }
+        recordings.insert(entry, at: 0)
         recordings.sort { $0.date > $1.date }
         save()
-        onRecordingAdded?(recording.id)
+        onRecordingAdded?(entry.id)
     }
 
     func update(_ id: UUID, _ mutate: (inout Recording) -> Void) {
@@ -297,17 +306,22 @@ final class RecordingStore {
 
     // MARK: - Compress in place
 
-    /// Recordings currently being converted (UI shows progress / disables actions).
-    private(set) var compressingIDs: Set<UUID> = []
+    /// Non-error notices (e.g. compression results) surfaced as an alert.
+    var infoMessage: String? = nil
+
+    /// Live conversion progress per recording (0…1); presence = converting.
+    private(set) var compressingProgress: [UUID: Double] = [:]
+
+    var compressingIDs: Set<UUID> { Set(compressingProgress.keys) }
 
     /// Converts an uncompressed recording to AAC in place: same file stem (so
     /// every sidecar keeps matching), duration-verified, original deleted only
     /// after the replacement checks out.
-    func compressAudio(_ recording: Recording) async {
+    func compressAudio(_ recording: Recording, spec: AudioCompressor.Spec = .storage) async {
         guard Self.compressibleExtensions.contains(recording.fileURL.pathExtension.lowercased()),
-              !compressingIDs.contains(recording.id) else { return }
-        compressingIDs.insert(recording.id)
-        defer { compressingIDs.remove(recording.id) }
+              compressingProgress[recording.id] == nil else { return }
+        compressingProgress[recording.id] = 0
+        defer { compressingProgress[recording.id] = nil }
 
         let destURL = recording.fileURL.deletingPathExtension().appendingPathExtension("m4a")
         guard !FileManager.default.fileExists(atPath: destURL.path) else {
@@ -315,8 +329,19 @@ final class RecordingStore {
             return
         }
 
+        let originalBytes = Self.fileSize(of: recording.fileURL)
+        let recordingID = recording.id
+
         do {
-            _ = try await AudioCompressor.compress(source: recording.fileURL, to: destURL, spec: .storage)
+            _ = try await AudioCompressor.compress(
+                source: recording.fileURL, to: destURL, spec: spec,
+                progress: { fraction in
+                    Task { @MainActor [weak self] in
+                        if self?.compressingProgress[recordingID] != nil {
+                            self?.compressingProgress[recordingID] = fraction
+                        }
+                    }
+                })
             let newDuration = Self.audioDuration(for: destURL)
             let tolerance = max(1.0, recording.duration * 0.01)
             guard newDuration > 0, abs(newDuration - recording.duration) <= tolerance else {
@@ -325,15 +350,27 @@ final class RecordingStore {
                 return
             }
             let originalURL = recording.fileURL
+            let newBytes = Self.fileSize(of: destURL)
             update(recording.id) {
                 $0.fileURL = destURL
                 $0.duration = newDuration
+                $0.fileSizeBytes = newBytes
             }
             try? FileManager.default.removeItem(at: originalURL)
+
+            let before = ByteCountFormatter.string(fromByteCount: originalBytes, countStyle: .file)
+            let after = ByteCountFormatter.string(fromByteCount: newBytes, countStyle: .file)
+            let saved = originalBytes > 0 ? Int((1 - Double(newBytes) / Double(originalBytes)) * 100) : 0
+            infoMessage = "Compressed “\(recording.displayName)”: \(before) → \(after) (\(saved)% smaller)."
         } catch {
             try? FileManager.default.removeItem(at: destURL)
             errorMessage = "Compression failed for \(recording.displayName): \(error.localizedDescription)"
         }
+    }
+
+    nonisolated static func fileSize(of url: URL) -> Int64 {
+        let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+        return (attrs?[.size] as? NSNumber)?.int64Value ?? 0
     }
 
     private func uniqueURL(for url: URL) -> URL {

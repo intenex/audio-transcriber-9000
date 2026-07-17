@@ -48,7 +48,8 @@ final class OpenAICompatibleChatProvider: ChatProvider {
         struct Choice: Decodable {
             struct Delta: Decodable {
                 let content: String?
-                let reasoning_content: String?
+                let reasoning_content: String?   // OpenAI-style reasoning field
+                let reasoning: String?           // MiniMax-M3 uses this name
                 let role: String?
             }
             let delta: Delta?
@@ -109,6 +110,9 @@ final class OpenAICompatibleChatProvider: ChatProvider {
             "messages": allMessages,
             "stream": true,
             "temperature": 0.7,
+            // Bound generation: reasoning models (MiniMax-M3) otherwise default
+            // to very large budgets and can churn for many minutes.
+            "max_tokens": 4_096,
         ] as [String: Any])
 
         let (bytes, response): (URLSession.AsyncBytes, URLResponse)
@@ -133,23 +137,29 @@ final class OpenAICompatibleChatProvider: ChatProvider {
         }
 
         var parser = SSEParser()
+        // Reasoning models (MiniMax-M3) embed <think>…</think> inside content
+        // deltas — reroute those spans to .reasoning events.
+        var thinkFilter = ThinkTagFilter()
         var buffer = Data()
         for try await byte in bytes {
             buffer.append(byte)
             // Parse in small batches to avoid per-byte overhead.
             if buffer.count >= 512 || byte == UInt8(ascii: "\n") {
-                try Self.handleEvents(parser.consume(buffer), continuation: continuation)
+                try Self.handleEvents(parser.consume(buffer), filter: &thinkFilter, continuation: continuation)
                 buffer.removeAll(keepingCapacity: true)
             }
             try Task.checkCancellation()
         }
         if !buffer.isEmpty {
-            try Self.handleEvents(parser.consume(buffer), continuation: continuation)
+            try Self.handleEvents(parser.consume(buffer), filter: &thinkFilter, continuation: continuation)
         }
-        try Self.handleEvents(parser.finish(), continuation: continuation)
+        try Self.handleEvents(parser.finish(), filter: &thinkFilter, continuation: continuation)
+        let tail = thinkFilter.flush()
+        if !tail.content.isEmpty { continuation.yield(.token(tail.content)) }
+        if !tail.reasoning.isEmpty { continuation.yield(.reasoning(tail.reasoning)) }
     }
 
-    private static func handleEvents(_ events: [String],
+    private static func handleEvents(_ events: [String], filter: inout ThinkTagFilter,
                                      continuation: AsyncThrowingStream<ChatStreamEvent, Error>.Continuation) throws {
         for payload in events {
             if payload == "[DONE]" { return }
@@ -162,11 +172,21 @@ final class OpenAICompatibleChatProvider: ChatProvider {
                 throw ChatProviderError.providerError(base.status_msg ?? "Provider error \(code)")
             }
             for choice in chunk.choices ?? [] {
-                if let reasoning = choice.delta?.reasoning_content, !reasoning.isEmpty {
-                    continuation.yield(.reasoning(reasoning))
+                let explicitReasoning = choice.delta?.reasoning_content ?? choice.delta?.reasoning
+                if let explicitReasoning, !explicitReasoning.isEmpty {
+                    continuation.yield(.reasoning(explicitReasoning))
                 }
                 if let content = choice.delta?.content, !content.isEmpty {
-                    continuation.yield(.token(content))
+                    let split = filter.process(content)
+                    // When the provider duplicates think text in a parallel
+                    // reasoning field (MiniMax does), the filtered reasoning is
+                    // redundant — only surface it when no explicit field came.
+                    if !split.reasoning.isEmpty && (explicitReasoning ?? "").isEmpty {
+                        continuation.yield(.reasoning(split.reasoning))
+                    }
+                    if !split.content.isEmpty {
+                        continuation.yield(.token(split.content))
+                    }
                 }
             }
         }

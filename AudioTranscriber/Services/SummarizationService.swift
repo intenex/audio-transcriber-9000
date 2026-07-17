@@ -68,14 +68,22 @@ struct SummarizationService {
     // MARK: - Private
 
     private static func parseSummaryJSON(_ response: String) throws -> RecordingSummary {
-        // Try to extract JSON from the response (LLM may wrap in markdown code blocks)
-        var jsonString = response.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Models wrap JSON in think blocks, code fences, or commentary — peel
+        // all of it off and isolate the first balanced JSON object.
+        var jsonString = response
+            .strippingThinkBlocks()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
 
         // Strip markdown code fences if present
         if jsonString.hasPrefix("```") {
             let lines = jsonString.components(separatedBy: "\n")
             let filtered = lines.filter { !$0.hasPrefix("```") }
             jsonString = filtered.joined(separator: "\n")
+        }
+
+        // If there's leading/trailing prose, extract the first balanced {...}.
+        if !jsonString.hasPrefix("{"), let extracted = firstBalancedJSONObject(in: jsonString) {
+            jsonString = extracted
         }
 
         guard let data = jsonString.data(using: .utf8) else {
@@ -107,6 +115,37 @@ struct SummarizationService {
         } catch {
             throw SummarizationError.invalidResponse("Failed to parse summary JSON: \(error.localizedDescription)")
         }
+    }
+
+    /// Extracts the first balanced `{…}` object, respecting strings/escapes.
+    private static func firstBalancedJSONObject(in text: String) -> String? {
+        guard let start = text.firstIndex(of: "{") else { return nil }
+        var depth = 0
+        var inString = false
+        var escaped = false
+        var index = start
+        while index < text.endIndex {
+            let char = text[index]
+            if escaped {
+                escaped = false
+            } else if inString {
+                if char == "\\" { escaped = true }
+                else if char == "\"" { inString = false }
+            } else {
+                switch char {
+                case "\"": inString = true
+                case "{": depth += 1
+                case "}":
+                    depth -= 1
+                    if depth == 0 {
+                        return String(text[start...index])
+                    }
+                default: break
+                }
+            }
+            index = text.index(after: index)
+        }
+        return nil
     }
 }
 

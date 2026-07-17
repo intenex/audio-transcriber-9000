@@ -58,6 +58,9 @@ struct KeychainSecureField: View {
             value = KeychainStore.shared.get(key) ?? ""
             isSaved = !value.isEmpty
         }
+        // Save on every edit — pasting a key must persist immediately,
+        // no Enter or focus change required.
+        .onChange(of: value) { _, _ in save() }
         .onChange(of: focused) { _, isFocused in
             if !isFocused { save() }
         }
@@ -266,6 +269,8 @@ struct SpeakersSettingsTab: View {
     @Environment(SpeakerLibraryStore.self) private var speakerLibrary
     @State private var playingClipURL: URL? = nil
     @State private var clipPlayer = ClipPlayer()
+    @State private var isPruning = false
+    @State private var pruneResult: String? = nil
 
     var body: some View {
         Form {
@@ -311,6 +316,29 @@ struct SpeakersSettingsTab: View {
                         .frame(width: 200)
                 }
                 Text("Threshold \(String(format: "%.2f", speakerLibrary.autoMatchThreshold)) — higher requires a closer voice match before auto-naming a speaker.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+
+                HStack {
+                    Button(isPruning ? "Checking clips…" : "Clean Up Silent Clips") {
+                        isPruning = true
+                        Task {
+                            let removed = await speakerLibrary.pruneSilentClips()
+                            pruneResult = removed == 0
+                                ? "All voice clips contain speech — nothing to clean up."
+                                : "Removed \(removed) silent clip\(removed == 1 ? "" : "s")."
+                            isPruning = false
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isPruning || speakerLibrary.speakers.isEmpty)
+                    if let pruneResult {
+                        Text(pruneResult)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Text("Scans every enrolled voice clip and removes ones that are only silence (these confuse speaker recognition).")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             } header: {
