@@ -14,9 +14,14 @@ final class ResumeIntegrationTests: XCTestCase {
     }
 
     /// A real ~18-minute recording from the local library (multi-chunk).
+    /// The library was compressed to m4a in July 2026 — prefer it, fall back
+    /// to the original wav for older checkouts of the library.
     private var longSampleURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Documents/AudioTranscriber/recording_2026-03-26_17-31-40.wav")
+        let stem = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Documents/AudioTranscriber/recording_2026-03-26_17-31-40")
+        let m4a = stem.appendingPathExtension("m4a")
+        if FileManager.default.fileExists(atPath: m4a.path) { return m4a }
+        return stem.appendingPathExtension("wav")
     }
 
     func testPauseAndResumeAcrossServiceRestart() async throws {

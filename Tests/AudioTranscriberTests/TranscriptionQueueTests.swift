@@ -160,6 +160,8 @@ final class TranscriptionQueueTests: XCTestCase {
         await waitUntil { self.store.recording(with: recording.id)?.status == .paused }
         XCTAssertEqual(store.recording(with: recording.id)?.status, .paused)
         XCTAssertTrue(FileManager.default.fileExists(atPath: recording.checkpointURL.path))
+        // Checkpoints live in real Application Support (ID-keyed) — clean up.
+        try? FileManager.default.removeItem(at: recording.checkpointURL)
     }
 
     func testFailureSetsFailedStatus() async {

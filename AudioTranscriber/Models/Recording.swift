@@ -97,7 +97,9 @@ struct Recording: Identifiable, Codable {
     var summaryURL: URL { sidecar("summary.json") }
     var chatURL: URL { sidecar("chat.json") }
     var speakersURL: URL { sidecar("speakers.json") }
-    var checkpointURL: URL { sidecar("partial.json") }
+    /// Device-local (Application Support, ID-keyed) — NOT beside the audio;
+    /// checkpoints must never enter a synced library tree.
+    var checkpointURL: URL { CheckpointLocation.url(for: id) }
     var markdownURL: URL { sidecar("md") }
     var metaURL: URL { sidecar("meta.json") }
 

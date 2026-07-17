@@ -120,7 +120,7 @@ Shared: `AudioCompressor` — windowed **AVAudioFile** reads + persistent AVAudi
 | `<stem>.speakers.json` | `[String: String]` id → display name | TranscriptionView pills + auto-match |
 | `<stem>.summary.json` | RecordingSummary | SummarizationService |
 | `<stem>.chat.json` | ChatHistory | ChatSessionView |
-| `<stem>.partial.json` | TranscriptionCheckpoint (deleted on success) | LocalFluidAudioEngine |
+| `<id>.partial.json` | TranscriptionCheckpoint (deleted on success) — **NOT beside the audio**: lives in `~/Library/Application Support/AudioTranscriber/Checkpoints/`, keyed by recording UUID (`CheckpointLocation`); device-local resume state must never enter a synced library. Legacy in-library checkpoints migrate at load | LocalFluidAudioEngine |
 | `<stem>.meta.json` | `RecordingMeta` — durable identity + user metadata (version, **id**, date, duration, name, category, engineUsed, fileSizeBytes, updatedAt; deliberately NO status) | RecordingStore (insert/update/load-backfill; no-op writes skipped so updatedAt stays honest) |
 `Recording.allSidecarURLs` is the single deletion list — extend it when adding a sidecar.
 

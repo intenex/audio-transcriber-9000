@@ -120,6 +120,8 @@ final class RecordingStoreTests: XCTestCase {
         var rec = Recording(fileURL: wav, date: .now, duration: 100)
         rec.status = .processing
         try Data("{}".utf8).write(to: rec.checkpointURL)
+        // Checkpoints live in real Application Support (ID-keyed) — clean up.
+        defer { try? FileManager.default.removeItem(at: rec.checkpointURL) }
         store.insert(rec)
         store.saveNow()
 

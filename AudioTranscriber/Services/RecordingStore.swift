@@ -79,6 +79,19 @@ final class RecordingStore {
             loaded.append(orphan)
         }
 
+        // Migrate legacy in-library checkpoints (<stem>.partial.json) to the
+        // device-local ID-keyed location.
+        for recording in loaded {
+            let legacy = recording.fileURL.deletingPathExtension().appendingPathExtension("partial.json")
+            guard FileManager.default.fileExists(atPath: legacy.path) else { continue }
+            let target = recording.checkpointURL
+            if FileManager.default.fileExists(atPath: target.path) {
+                try? FileManager.default.removeItem(at: legacy)
+            } else {
+                try? FileManager.default.moveItem(at: legacy, to: target)
+            }
+        }
+
         // Launch repair: a persisted .processing job was interrupted.
         for idx in loaded.indices where loaded[idx].status == .processing {
             let hasCheckpoint = FileManager.default.fileExists(atPath: loaded[idx].checkpointURL.path)

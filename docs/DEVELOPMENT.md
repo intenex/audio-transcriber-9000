@@ -19,6 +19,7 @@ How to work on this codebase without regressing it. Read [ARCHITECTURE.md](ARCHI
 - **Secrets go in Keychain**, never UserDefaults. New key ⇒ add a `SecretKey` case. New UserDefaults key ⇒ add it to the inventory in ARCHITECTURE.md.
 - **recordings.json is a rebuildable cache; `.meta.json` is the durable metadata source.** Code must survive a deleted/corrupt manifest (orphan adoption + meta sidecars rebuild it, stable UUIDs included). Metadata edits (name/category/engineUsed) must go through `store.update`/the category APIs — direct array mutation would leave the sidecar stale. Don't add state that can't be reconstructed or tolerated as lost.
 - **All library writes are atomic via `AtomicFile`** — never `data.write(to:)` a sidecar directly; partial files must be unobservable (sync agents upload mid-write otherwise).
+- **Checkpoints live OUTSIDE the library** (`CheckpointLocation`: Application Support, keyed by recording UUID) — they're rewritten every chunk and are device-local. Never derive a checkpoint path from the audio stem; `Recording.checkpointURL` is the only source. Stable UUIDs (via `.meta.json`) are what make ID-keying safe.
 
 ## Concurrency rules (violations here were real crashes)
 

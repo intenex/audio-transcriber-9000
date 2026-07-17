@@ -68,7 +68,7 @@ struct TranscriptionCheckpoint: Codable, Equatable {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         if let data = try? encoder.encode(self) {
-            try? data.write(to: url, options: .atomic)
+            try? AtomicFile.write(data, to: url)
         }
     }
 
