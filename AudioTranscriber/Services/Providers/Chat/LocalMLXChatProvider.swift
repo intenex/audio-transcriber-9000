@@ -16,6 +16,12 @@ final class LocalMLXChatProvider: ChatProvider {
 
     var isConfigured: Bool { isAvailable }
 
+    var modelIdentity: String {
+        // Short form of the HF id, e.g. "Mistral-7B-Instruct-v0.3-4bit (local)"
+        let short = selectedModel.components(separatedBy: "/").last ?? selectedModel
+        return "\(short) (local)"
+    }
+
     var selectedModel: String {
         get { UserDefaults.standard.string(forKey: "llmModel") ?? "mlx-community/Mistral-7B-Instruct-v0.3-4bit" }
         set { UserDefaults.standard.set(newValue, forKey: "llmModel") }

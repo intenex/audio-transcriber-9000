@@ -177,7 +177,7 @@ final class TranscriptionService {
 
         do {
             let output = try await task.value
-            try finish(recording: recording, output: output)
+            try finish(recording: recording, output: output, engine: engine)
             stopIntents[job.recordingID] = nil
         } catch is CancellationError {
             handleStop(job)
@@ -207,11 +207,13 @@ final class TranscriptionService {
         }
     }
 
-    private func finish(recording: Recording, output: TranscriptionOutput) throws {
+    private func finish(recording: Recording, output: TranscriptionOutput,
+                        engine: any TranscriptionEngine) throws {
         guard let store else { return }
 
         // Write sidecars in the existing formats.
-        let markdown = MarkdownFormatter.format(result: output.result, recording: recording)
+        let markdown = MarkdownFormatter.format(result: output.result, recording: recording,
+                                                engineAttribution: engine.modelDescription)
         try markdown.write(to: recording.markdownURL, atomically: true, encoding: .utf8)
         if let segmentData = try? JSONEncoder().encode(output.result.segments) {
             try? segmentData.write(to: recording.segmentsURL)
@@ -235,9 +237,11 @@ final class TranscriptionService {
 
         try? FileManager.default.removeItem(at: recording.checkpointURL)
 
+        let attribution = engine.modelDescription
         store.update(recording.id) {
             $0.transcriptionURL = recording.markdownURL
             $0.status = .done
+            $0.engineUsed = attribution
         }
 
         notifyCompletion(recording: recording)
@@ -260,7 +264,9 @@ final class TranscriptionService {
 
         do {
             let summary = try await SummarizationService.summarize(
-                transcript: markdown, provider: chatService.activeProvider)
+                transcript: markdown,
+                provider: chatService.activeProvider,
+                namingContext: namingContext(for: recording))
             SummarizationService.saveSummary(summary, for: recording)
             if store.recording(with: recordingID)?.name == nil {
                 store.update(recordingID) { $0.name = summary.generatedName }
@@ -268,6 +274,39 @@ final class TranscriptionService {
         } catch {
             // Non-fatal: summarization failure shouldn't affect transcription success.
         }
+    }
+
+    /// Builds context for smart auto-naming: who was identified in this call
+    /// (via the voice library / speaker renames) and how past calls with the
+    /// same people were named, so new names follow established series patterns
+    /// (e.g. recurring therapy sessions keep a consistent naming style).
+    func namingContext(for recording: Recording) -> String? {
+        guard let speakerData = try? Data(contentsOf: recording.speakersURL),
+              let names = try? JSONDecoder().decode([String: String].self, from: speakerData),
+              !names.isEmpty else { return nil }
+
+        let speakerNames = Array(Set(names.values)).sorted()
+        var lines = ["Known speakers in this call: \(speakerNames.joined(separator: ", "))."]
+
+        if let speakerLibrary, let store {
+            var pastNames: [String] = []
+            var seen = Set<String>()
+            for enrolled in speakerLibrary.speakers
+            where speakerNames.contains(where: { $0.caseInsensitiveCompare(enrolled.name) == .orderedSame }) {
+                for pastID in enrolled.recordingIDs where pastID != recording.id {
+                    guard let past = store.recording(with: pastID),
+                          let pastName = past.name,
+                          !seen.contains(pastName) else { continue }
+                    seen.insert(pastName)
+                    pastNames.append(pastName)
+                }
+            }
+            if !pastNames.isEmpty {
+                lines.append("Previous calls with these speakers were named: \(pastNames.suffix(12).joined(separator: "; ")).")
+                lines.append("If this call is clearly part of the same series, follow the same naming pattern.")
+            }
+        }
+        return lines.joined(separator: "\n")
     }
 
     // MARK: - Notifications

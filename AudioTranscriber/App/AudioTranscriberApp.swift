@@ -35,8 +35,11 @@ struct AudioTranscriberApp: App {
                         case .local: return nil
                         }
                     }
-                    audioRecorder.onNewRecording = { id in
-                        if UserDefaults.standard.bool(forKey: "autoTranscribeNewRecordings") {
+                    // Auto-transcribe every new recording/import (default ON);
+                    // summary + smart auto-naming follow transcription.
+                    recordingStore.onRecordingAdded = { id in
+                        let auto = UserDefaults.standard.object(forKey: "autoTranscribeNewRecordings") as? Bool ?? true
+                        if auto {
                             transcriptionService.enqueue(id)
                         }
                     }

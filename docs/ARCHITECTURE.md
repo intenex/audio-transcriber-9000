@@ -45,6 +45,8 @@ protocol TranscriptionEngine: Sendable {
 }
 ```
 
+Engines also expose `modelDescription` (e.g. "On-Device · Parakeet v3 + pyannote") — written to `Recording.engineUsed` and the markdown header on completion, so every transcript records what produced it.
+
 Invariants every engine MUST uphold:
 - **Speaker IDs normalized** to `SPEAKER_00`-style strings in first-appearance order (all downstream UI — MarkdownFormatter, speaker pills, `.speakers.json` — depends on this).
 - **Honor structured Task cancellation** (`try Task.checkCancellation()` between units of work; throw `CancellationError`). The service maps cancellation → pause/cancel intent.
@@ -54,7 +56,7 @@ Invariants every engine MUST uphold:
 
 ## Local pipeline (`LocalFluidAudioEngine`, actor — models stay loaded across jobs)
 
-1. `AudioConverter().resampleAudioFile(url)` → 16 kHz mono Float32 (whole file in RAM; 5 h ≈ 1.15 GB — fine on this machine).
+1. `WindowedAudioLoader.load16kMono(from:)` → 16 kHz mono Float32 (whole result in RAM; 5 h ≈ 1.15 GB — fine). Windowed 60 s reads through **one persistent AVAudioConverter** — a single whole-file read (what FluidAudio's `resampleAudioFile` does) fails with coreaudio **error -40** once the PCM payload exceeds ~2 GB (≈3 h of Float32/48 kHz). Tolerates mid-file read errors from truncated headers (transcribes what exists).
 2. **Chunk plan**: `ChunkPlanner.plan` — 180 s targets, boundaries snapped to the midpoint of the nearest VAD silence gap within ±30 s (Silero VAD via `VadManager.segmentSpeech`; VAD failure degrades to hard cuts). The plan is **persisted in the checkpoint and reused verbatim on resume** — never recomputed.
 3. **Per-chunk serial loop** with `Task.checkCancellation()`: slice samples → `AsrManager.transcribe(_, source: .system)` → word timings via `WordTimingAssembler` (token timings; interpolation fallback when absent) offset to absolute time → `checkpoint.record` + atomic save of `<stem>.partial.json` → `RTFStore.record` → progress+ETA callback. Cancel/checkpoint granularity ≈ 2 s wall.
 4. **Diarization**: one full-file `DiarizerManager.performCompleteDiarization` pass after ASR (global clustering ≫ per-chunk accuracy). It's synchronous & heavy → dispatched to a GCD queue so it can't starve the Swift-concurrency cooperative pool. `checkpoint.asrComplete = true` beforehand, so a kill during diarization only re-runs diarization.
@@ -88,8 +90,9 @@ Shared: `AudioCompressor` (AVAssetReader→AVAssetWriter; AAC 16 kHz mono 32 kbp
 ## Chat layer (`Services/Providers/Chat/`)
 
 - `ChatProvider` protocol: `streamChat(messages:system:) -> AsyncThrowingStream<ChatStreamEvent, Error>` (`.token` / `.reasoning`), `contextCharacterBudget` (local 6 k, cloud 100 k — consumers truncate context with it), `isConfigured`. Default `generate()` accumulates tokens.
+- Every provider exposes `modelIdentity` (concrete model name) — stamped onto assistant `ChatMessage.modelUsed` (shown under bubbles) and `RecordingSummary.modelUsed` (summary footer). Model attribution is a product requirement: anything a model generates records which model.
 - `OpenAICompatibleChatProvider` — one class, three instantiations (base URL/model/key via closures so Settings edits apply live):
-  - MiniMax: `https://api.minimax.io/v1` (international), default model `MiniMax-M2` (UserDefaults `miniMaxModel`)
+  - MiniMax: `https://api.minimax.io/v1` (international), default model `MiniMax-M3` (UserDefaults `miniMaxModel`; LegacySettingsMigrator v2 clears a stored old `MiniMax-M2` default)
   - OpenAI: `https://api.openai.com/v1`, default `gpt-4o-mini` (`openAIChatModel`)
   - Custom: base URL `customChatBaseURL`, model `customChatModel`, key `.custom`
   SSE via `URLSession.bytes` + chunk-boundary-safe `SSEParser`. MiniMax quirks handled: `reasoning_content` deltas → `.reasoning` (UI shows "Thinking…"), `base_resp.status_code != 0` on HTTP 200 → error, undecodable chunks skipped. Timeouts 30 s request / 600 s resource.
@@ -104,6 +107,8 @@ Shared: `AudioCompressor` (AVAssetReader→AVAssetWriter; AAC 16 kHz mono 32 kbp
 - Matching: after each local transcription, cluster embeddings vs library via `SpeakerMatcher` (vDSP cosine, best-of-multiple-embeddings, threshold slider 0.50–0.90 in Settings → Speakers). Writes into `.speakers.json` only for keys the user hasn't set. Cloud: `referenceCandidates(limit: 4)` ranked by recordings-seen then recency feed OpenAI's known-speaker fields.
 
 ## Persistence
+
+**Auto-processing**: `RecordingStore.onRecordingAdded` fires for genuinely new recordings/imports (never for migration/orphan adoption); app wiring enqueues transcription when `autoTranscribeNewRecordings` is on (**default true**). Post-transcription auto-summary then auto-names unnamed recordings, using `TranscriptionService.namingContext(for:)` — identified speakers + names of past calls with those speakers (via the voice library) so titles follow established series patterns.
 
 **`RecordingStore`** (@Observable @MainActor) owns `recordings` + `categories`, persisted to `<storageDir>/recordings.json` (schemaVersion 1, entries with **relative** `fileName` for in-dir files / `absolutePath` otherwise). Load order: manifest → else one-time migration from UserDefaults key `"recordings"` (legacy key left as rollback backup; the manifest's existence is the migration marker) → drop entries with missing audio → **orphan adoption** (any untracked audio file in the dir becomes a Recording; `.md` present ⇒ `.done`; ≤4096-byte crash artifacts skipped) → status repair. Saves are debounced 500 ms + `saveNow()` on `willTerminateNotification`. **The directory is the source of truth** — a lost manifest self-heals. Category rename cascades into recordings; renaming onto an existing name **merges** (no duplicate entries); delete falls back to Uncategorized.
 
@@ -120,7 +125,9 @@ Shared: `AudioCompressor` (AVAssetReader→AVAssetWriter; AAC 16 kHz mono 32 kbp
 
 **Secrets**: Keychain only (`KeychainStore`, kSecClassGenericPassword, service = bundle id; `SecretKey`: `openai.apiKey`, `minimax.apiKey`, `assemblyai.apiKey`, `custom.apiKey`). `InMemorySecretsStore` for tests. Never mirror secrets into UserDefaults.
 
-**UserDefaults inventory** (add new keys to this list): `storageDirectory`, `llmModel`, `recordings` (legacy backup only), `defaultTranscriptionEngine`, `confirmCloudTranscription`, `autoSummarize`, `autoTranscribeNewRecordings`, `liveTranscriptionPreview`, `chatProviderID`, `miniMaxModel`, `openAIChatModel`, `customChatBaseURL`, `customChatModel`, `diarizationClusteringThreshold`, `playbackRate`, `collapsedCategories`, `rtf.<engineID>`, `didCleanupLegacyKeys.v1`.
+**UserDefaults inventory** (add new keys to this list): `storageDirectory`, `llmModel`, `recordings` (legacy backup only), `defaultTranscriptionEngine`, `confirmCloudTranscription`, `autoSummarize`, `autoTranscribeNewRecordings` (default **true**), `liveTranscriptionPreview`, `chatProviderID`, `miniMaxModel` (default MiniMax-M3), `openAIChatModel`, `customChatBaseURL`, `customChatModel`, `diarizationClusteringThreshold`, `playbackRate`, `collapsedCategories`, `rtf.<engineID>`, `didCleanupLegacyKeys.v1`, `didCleanupLegacyKeys.v2`.
+
+**Summary sidecar v2**: `RecordingSummary` gained optional `keyPoints`, `decisions`, `topics`, `modelUsed` — old `.summary.json` files decode unchanged; the summary tab renders topics as tags and the sections with distinct icons.
 
 ## Recording & playback (`AudioRecorder`)
 
@@ -132,4 +139,4 @@ Shared: `AudioCompressor` (AVAssetReader→AVAssetWriter; AAC 16 kHz mono 32 kbp
 
 ## Views
 
-`ContentView` (NavigationSplitView) → `RecordingListView` (search, collapsible category sections, context menus, engine submenu) | detail: `RecordingControlView` (record + live preview) / `TranscriptionView` (header + playback bar + tabs Transcript/Summary/Chat, split Transcribe button with per-engine costs, `CloudTranscribeConfirmSheet`, active/queued/paused/failed states with ETA + Pause/Cancel, speaker pills + enrollment popover, export menu) / `ChatSessionView` (.global). `InteractiveTranscriptView` = NSViewRepresentable NSTextView: word-click seeks audio, playback word highlighting (yellow background), search highlighting (orange underline — deliberately a different attribute so they don't clobber each other). `SettingsView` tabs: General / Transcription / AI Chat / Speakers / Storage.
+`ContentView` (NavigationSplitView) → `RecordingListView` (search, collapsible category sections, context menus, engine submenu) | detail: `RecordingControlView` (record + live preview) / `TranscriptionView` (header + playback bar + tabs Transcript/Summary/Chat, split Transcribe button with per-engine costs, `CloudTranscribeConfirmSheet`, active/queued/paused/failed states with ETA + Pause/Cancel, speaker pills + enrollment popover, export menu) / `ChatSessionView` (.global). `InteractiveTranscriptView` = NSViewRepresentable NSTextView: word-click seeks audio, playback word highlighting (yellow background), search highlighting (orange underline — deliberately a different attribute so they don't clobber each other). It takes a `contentID` (the recording id) and **re-assigns `coordinator.onSeek` on every `updateNSView`** — SwiftUI reuses the NSView + Coordinator across sidebar selection changes, and a stale captured closure once made word-clicks play the previously viewed recording. `SettingsView` tabs: General / Transcription / AI Chat / Speakers / Storage.

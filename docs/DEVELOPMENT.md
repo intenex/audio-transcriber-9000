@@ -26,6 +26,8 @@ How to work on this codebase without regressing it. Read [ARCHITECTURE.md](ARCHI
 - **Every `Process` must have both pipes drained continuously** (readabilityHandler or equivalent) — a full 64 KB pipe deadlocks the child forever. This exact bug was why long transcriptions never finished pre-overhaul, and it existed a second time in the old LLM service's stderr. Also: retain the `Process`/`Task` so it can be cancelled, and wire `continuation.onTermination` to kill children.
 - **Timeouts must not depend on receiving data.** Waiting loops poll a buffer + deadline (see `MLXServerProcess.waitForReady`) rather than `for await` alone — a silent child means no chunks means a dead deadline check.
 - **AVAudioEngine**: hardware init off the main thread (TCC deadlock); no format conversion inside the tap callback (historic `ExtAudioFile::WriteInputProc` crash) — the `AVAudioFile(… commonFormat:)` trick converts internally instead; don't reuse an `AsyncStream` across cancelled iterations (single-consumption; cancellation finishes the continuation).
+- **Large-file reads**: a single `AVAudioFile.read`/`ExtAudioFileRead` fails with coreaudio **error -40** once the requested payload exceeds ~2 GB (internal 32-bit overflow) — any recording over ~3 h of Float32/48 kHz. Always read in windows; use `WindowedAudioLoader` (persistent AVAudioConverter across windows, so no resampler seams).
+- **NSViewRepresentable coordinators outlive selection changes.** SwiftUI reuses the NSView + Coordinator when the detail view switches records — any closure or content captured at `makeCoordinator`/`makeNSView` time goes stale. Re-assign closures in `updateNSView` and key content rebuilds on an explicit `contentID`, not on data shape (two recordings can have identical segment counts). This exact bug made transcript clicks play the previously viewed recording.
 
 ## FluidAudio gotchas (pinned `exactVersion: 0.12.4` — re-verify all of these on upgrade)
 
@@ -49,7 +51,7 @@ How to work on this codebase without regressing it. Read [ARCHITECTURE.md](ARCHI
 
 - Cloud engines are verified against mocked HTTP only — live-key smoke tests still pending (needs user's keys; run one short + one long recording through OpenAI and AssemblyAI when keys exist).
 - OpenAI multi-part uploads: >4 concurrently-present speakers can fragment identity across parts (reference cap is 4) — accepted; pills rename merges.
-- The 4 h 56 m / 3.2 GB sample hasn't been run end-to-end (the 2 h 07 m one has; same code path, ~2× the time). Memory headroom is fine (~2.3 GB peak expected).
+- Attribution: cloud transcription attribution is engine-level (`modelDescription`); AssemblyAI doesn't expose a finer model name in responses we parse.
 - Speaker library "re-embed from clips" (after a FluidAudio model upgrade) is not implemented — enrollments would need re-creating from source recordings.
 - ElevenLabs Scribe is the natural third cloud engine if wanted (follow the engine recipe).
 - `AudioRecorder`'s tap-local `firstWriteError` capture is technically an unsynchronized cross-thread read (benign in practice with the 300 ms margin) — tidy if you're in there anyway.

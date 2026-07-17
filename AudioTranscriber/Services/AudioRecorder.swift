@@ -17,9 +17,6 @@ final class AudioRecorder: NSObject {
     var errorMessage: String? = nil
 
     private weak var store: RecordingStore?
-    /// Called with the new recording's ID after it lands in the store
-    /// (used for the auto-transcribe setting).
-    var onNewRecording: ((UUID) -> Void)? = nil
     /// Live transcript preview sink (optional; fed from the tap callback).
     var liveTranscriber: LiveTranscriber? = nil
     private var audioEngine: AVAudioEngine?
@@ -190,7 +187,6 @@ final class AudioRecorder: NSObject {
         let recording = Recording(fileURL: url, date: date, duration: duration)
 
         store?.insert(recording)
-        onNewRecording?(recording.id)
         return recording
     }
 

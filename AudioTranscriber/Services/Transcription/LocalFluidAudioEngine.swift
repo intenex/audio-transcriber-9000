@@ -7,6 +7,7 @@ import FluidAudio
 actor LocalFluidAudioEngine: TranscriptionEngine {
     nonisolated let id = "local.fluidaudio.parakeet-v3"
     nonisolated let kind = TranscriptionEngineKind.local
+    nonisolated let modelDescription = "On-Device · Parakeet v3 + pyannote"
 
     static let diarizerCalibrationID = "local.fluidaudio.offline-diarizer"
 
@@ -95,11 +96,13 @@ actor LocalFluidAudioEngine: TranscriptionEngine {
                 "Speech models aren't available. Check your internet connection and try again.")
         }
 
-        // 1. Load audio (resampled to 16kHz mono Float32).
+        // 1. Load audio (resampled to 16kHz mono Float32). Windowed loader —
+        // a single whole-file read fails with error -40 past ~2GB of PCM
+        // (every recording longer than ~3 hours).
         progress(TranscriptionProgress(phase: .loadingAudio, fractionComplete: 0.01, message: "Loading audio…"))
         let samples: [Float]
         do {
-            samples = try AudioConverter().resampleAudioFile(request.audioURL)
+            samples = try WindowedAudioLoader.load16kMono(from: request.audioURL)
         } catch {
             throw TranscriptionEngineError.audioLoadFailed(error.localizedDescription)
         }

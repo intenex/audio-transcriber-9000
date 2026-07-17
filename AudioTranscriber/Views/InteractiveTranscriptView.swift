@@ -2,6 +2,10 @@ import SwiftUI
 import AppKit
 
 struct InteractiveTranscriptView: NSViewRepresentable {
+    /// Identity of the content (the recording's id). SwiftUI reuses the same
+    /// NSView + Coordinator when the user switches recordings, so this is what
+    /// tells the coordinator "different recording — rebuild everything".
+    let contentID: String
     let segments: [TranscriptionSegment]
     let currentTime: Double
     let isPlaying: Bool
@@ -44,8 +48,15 @@ struct InteractiveTranscriptView: NSViewRepresentable {
         let coordinator = context.coordinator
         guard let textView = scrollView.documentView as? ClickableTextView else { return }
 
-        if coordinator.needsRebuild(for: segments, speakerNames: speakerNames) {
+        // CRITICAL: refresh the seek closure every update. The coordinator is
+        // created once and survives recording switches; a stale closure here
+        // made word-clicks play the previously viewed recording.
+        coordinator.onSeek = onSeek
+
+        if coordinator.needsRebuild(contentID: contentID, segments: segments, speakerNames: speakerNames) {
             coordinator.buildAndSetText(from: segments, speakerNames: speakerNames, in: textView)
+            coordinator.lastContentID = contentID
+            textView.scroll(.zero)
         }
 
         // Update search highlighting
@@ -65,17 +76,21 @@ struct InteractiveTranscriptView: NSViewRepresentable {
         var highlightedRange: NSRange? = nil
         var searchHighlightedRanges: [NSRange] = []
         var lastSegmentCount: Int = -1
+        var lastContentID: String = ""
         var lastSpeakerNames: [String: String] = [:]
         var lastSearchQuery: String = ""
-        let onSeek: (TimeInterval) -> Void
+        var onSeek: (TimeInterval) -> Void
         weak var textView: ClickableTextView?
 
         init(onSeek: @escaping (TimeInterval) -> Void) {
             self.onSeek = onSeek
         }
 
-        func needsRebuild(for segments: [TranscriptionSegment], speakerNames: [String: String]) -> Bool {
-            lastSegmentCount != segments.count || lastSpeakerNames != speakerNames
+        func needsRebuild(contentID: String, segments: [TranscriptionSegment],
+                          speakerNames: [String: String]) -> Bool {
+            lastContentID != contentID
+                || lastSegmentCount != segments.count
+                || lastSpeakerNames != speakerNames
         }
 
         func buildAndSetText(from segments: [TranscriptionSegment], speakerNames: [String: String], in textView: ClickableTextView) {

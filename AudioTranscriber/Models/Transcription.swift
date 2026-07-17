@@ -69,7 +69,9 @@ struct MarkdownFormatter {
         return rawSpeaker
     }
 
-    static func format(result: TranscriptionResult, recording: Recording, customSpeakerNames: [String: String] = [:]) -> String {
+    static func format(result: TranscriptionResult, recording: Recording,
+                       customSpeakerNames: [String: String] = [:],
+                       engineAttribution: String? = nil) -> String {
         var lines: [String] = []
 
         // Header — use recording name if set
@@ -83,6 +85,9 @@ struct MarkdownFormatter {
         lines.append("**Date:** \(dateStr)")
         lines.append("**Duration:** \(recording.durationString)")
         lines.append("**Speakers detected:** \(result.numSpeakers)")
+        if let engineAttribution {
+            lines.append("**Transcribed with:** \(engineAttribution)")
+        }
         lines.append("")
         lines.append("---")
         lines.append("")

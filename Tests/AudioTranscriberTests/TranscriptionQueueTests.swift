@@ -5,6 +5,7 @@ import XCTest
 final class MockTranscriptionEngine: TranscriptionEngine, @unchecked Sendable {
     let id = "mock.engine"
     let kind = TranscriptionEngineKind.local
+    let modelDescription = "Mock Engine"
 
     var handler: @Sendable (TranscriptionRequest) async throws -> TranscriptionOutput
     private(set) var transcribedIDs: [UUID] = []

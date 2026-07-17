@@ -16,6 +16,7 @@ What exists, how to run it, and what "verified" means in this project. See [DEVE
 | `CloudEngineTests` | AudioSplitPlanner (25 MB math vs the real 4 h 56 m duration), PartMerger (offsets, canonical minting, enrolled-name propagation, S-token continuity), diarized_json + AssemblyAI response parsing, cost estimator, **mocked AssemblyAI end-to-end flow with real audio compression** |
 | `SpeakerLibraryTests` | cosine math + thresholds, library round-trip (iso8601!), case-insensitive upsert, auto-match writes `.speakers.json` without overwriting user names, clip candidate selection rules |
 | `SharedUtilsTests` | SSEParser (chunk boundaries, CRLF, multi-line data, [DONE]), MultipartFormData framing, KeychainStore round-trip (isolated service name) |
+| `WindowedAudioLoaderTests` | resample length/energy on synthetic WAVs (48 k mono, 44.1 k stereo mixdown, 16 k passthrough), near-empty rejection, **equivalence with FluidAudio's loader on the real fixture** (length ±0.5 %, RMS ±10 %) |
 | `AudioRecorderTests` / `TranscriptionServiceTests` | model basics, formatter output, service initial state |
 
 **Integration — gated by a marker file, uses real models (~1.5 GB, cached after first run):**
@@ -35,7 +36,8 @@ rm /tmp/audiotranscriber-integration-tests
 |---|---|---|
 | `LocalEngineIntegrationTests` | Full local pipeline on the repo's 63 s 2-speaker fixture (`test_recording.wav`): segments, **exactly 2 speakers**, monotonic word times, embeddings returned, RTF recorded | 2.4 s warm |
 | `ResumeIntegrationTests` | Store+queue+real engine on a real 18-min recording: pause mid-ASR (2/6 chunks), **fresh service resumes at part 3/6**, full coverage, checkpoint cleaned | 29 s total incl. pause cycle |
-| `LongFileSmokeTests` | The real 2 h 07 m / 1.4 GB recording end-to-end (read-only on the source; checkpoint in temp): 43 chunks, 247 segments, 9 695 words, 2 speakers, 100 % coverage | 142 s (53×) |
+| `LongFileSmokeTests` (2 h) | The real 2 h 07 m / 1.4 GB recording end-to-end (read-only on the source; checkpoint in temp): 43 chunks, 247 segments, 9 695 words, 2 speakers, 100 % coverage | 142 s (53×) |
+| `LongFileSmokeTests` (5 h) | The real 4 h 56 m / **3.4 GB** recording — the file whose >2 GB payload crashed the old single-shot loader with error -40: 99 chunks, 544 segments, 100 % coverage via `WindowedAudioLoader` | 362 s (49×) |
 | `DiarizerThresholdSweepTests` | Tuning harness: speaker count per clusteringThreshold on the fixture (0.85 ⇒ 2 ✓) | ~10 s |
 
 Long real samples referenced by the integration tests live in `~/Documents/AudioTranscriber/` (tests `XCTSkip` when absent).

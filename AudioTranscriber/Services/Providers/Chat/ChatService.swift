@@ -25,7 +25,7 @@ final class ChatService {
         miniMax = OpenAICompatibleChatProvider(
             id: .miniMax, displayName: "MiniMax",
             baseURL: { URL(string: "https://api.minimax.io/v1") },
-            model: { defaults.string(forKey: "miniMaxModel") ?? "MiniMax-M2" },
+            model: { defaults.string(forKey: "miniMaxModel") ?? "MiniMax-M3" },
             secretKey: .miniMax, secrets: secrets)
         openAI = OpenAICompatibleChatProvider(
             id: .openAI, displayName: "OpenAI",

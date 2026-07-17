@@ -2,25 +2,45 @@ import Foundation
 
 struct SummarizationService {
 
-    static func summarize(transcript: String, provider: any ChatProvider) async throws -> RecordingSummary {
+    /// Summarize a transcript. `namingContext` (optional) carries identified
+    /// speakers and the names of past calls with those speakers so generated
+    /// names follow an established series pattern (e.g. ongoing therapy calls).
+    static func summarize(transcript: String, provider: any ChatProvider,
+                          namingContext: String? = nil) async throws -> RecordingSummary {
         // Leave room for the instructions inside the provider's context budget.
-        let budget = max(2_000, provider.contextCharacterBudget - 1_000)
-        let prompt = """
-        Given this transcript, provide a JSON response with exactly these fields:
-        - "summary": A concise 2-3 paragraph summary of the key points discussed
-        - "actionItems": An array of action item strings extracted from the conversation (empty array if none)
-        - "generatedName": A short descriptive name for this recording (5 words max)
+        let budget = max(2_000, provider.contextCharacterBudget - 1_500)
 
-        Respond ONLY with valid JSON, no markdown formatting or code blocks.
+        var contextBlock = ""
+        if let namingContext, !namingContext.isEmpty {
+            contextBlock = """
+
+            Context about this recording:
+            \(namingContext)
+
+            """
+        }
+
+        let prompt = """
+        Analyze this conversation transcript and respond with a JSON object with exactly these fields:
+        - "summary": 2-4 crisp paragraphs covering what the conversation was about, what was discussed, and how it concluded. Refer to speakers by name when names are known. You may use **bold** for emphasis on names and key terms.
+        - "keyPoints": array of 3-8 short bullet strings — the most important facts, findings, or moments.
+        - "decisions": array of strings — decisions that were made or agreed on (empty array if none).
+        - "actionItems": array of strings — concrete follow-ups/tasks. Format each as "task — owner" when the responsible person is identifiable, otherwise just the task.
+        - "topics": array of 2-5 short lowercase tags describing the subject matter (e.g. "fertility", "scheduling", "budget").
+        - "generatedName": a short, specific, descriptive title (max 6 words). If the context above shows this call belongs to a series of similarly named past calls, follow the SAME naming pattern as those calls.
+        \(contextBlock)
+        Respond ONLY with valid JSON — no markdown code fences, no commentary.
 
         Transcript:
         \(transcript.prefix(budget))
         """
 
-        let system = "You are a helpful assistant that analyzes meeting transcripts. Always respond with valid JSON only."
+        let system = "You are an expert conversation analyst. Always respond with a single valid JSON object and nothing else."
 
         let response = try await provider.generate(prompt: prompt, system: system)
-        return try parseSummaryJSON(response)
+        var summary = try parseSummaryJSON(response)
+        summary.modelUsed = provider.modelIdentity
+        return summary
     }
 
     static func loadSummary(for recording: Recording) -> RecordingSummary? {
@@ -62,20 +82,27 @@ struct SummarizationService {
             throw SummarizationError.invalidResponse("Could not convert response to data")
         }
 
-        // Try to decode the full structure
+        // Try to decode the full structure (new fields optional — smaller local
+        // models sometimes omit them).
         struct RawSummary: Decodable {
             let summary: String
-            let actionItems: [String]
+            let actionItems: [String]?
             let generatedName: String
+            let keyPoints: [String]?
+            let decisions: [String]?
+            let topics: [String]?
         }
 
         do {
             let raw = try JSONDecoder().decode(RawSummary.self, from: data)
             return RecordingSummary(
                 summary: raw.summary,
-                actionItems: raw.actionItems,
+                actionItems: raw.actionItems ?? [],
                 generatedName: raw.generatedName,
-                generatedAt: .now
+                generatedAt: .now,
+                keyPoints: raw.keyPoints,
+                decisions: raw.decisions,
+                topics: raw.topics
             )
         } catch {
             throw SummarizationError.invalidResponse("Failed to parse summary JSON: \(error.localizedDescription)")

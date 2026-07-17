@@ -38,6 +38,7 @@
 		6E28092A63152D1745F8EB15 /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = 333F0E7DD5B8B03E24A9D41B /* FluidAudio */; };
 		74810BB3993865BA2AEBAB4F /* DiarizedJSONResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 023F4FA474E3C94068CACB4B /* DiarizedJSONResponse.swift */; };
 		75A879DE72CC124D1D067A70 /* LocalEngineIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A3A5A2436579319533D6FB8 /* LocalEngineIntegrationTests.swift */; };
+		7730C42AD2BC89AF9A564213 /* WindowedAudioLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0E582311CF836C8B44978EB /* WindowedAudioLoader.swift */; };
 		7A8B943EAC9984B2FEBFBDCD /* LocalMLXChatProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7802F7F1524E5E7DC3AB537B /* LocalMLXChatProvider.swift */; };
 		7C2FE0D3BB2A800FDAC94027 /* ModelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33F4DE33ABF9936217E52B1B /* ModelManager.swift */; };
 		807EE0F38A8516D65EB9B7E6 /* SleepGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4498CCAC06D1956CE57FD2C4 /* SleepGuard.swift */; };
@@ -58,6 +59,7 @@
 		B7F0E861901FE54B6C3BBF61 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D598658469171EF291DDD93B /* SettingsView.swift */; };
 		C01997E4B27680DBB219295E /* ChatProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DC0297054C4E420747729B0 /* ChatProviderTests.swift */; };
 		C1E5B4513B5A3873D06A1A82 /* SpeakerMatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 671BF077C8DD38C71D49DAA4 /* SpeakerMatcher.swift */; };
+		C60A763836EC044FEC9FDCEC /* WindowedAudioLoaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBB28223D6990C9D00C67B1C /* WindowedAudioLoaderTests.swift */; };
 		C81C58D101A7EB33FE5C3A42 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA667FE476024A2113507D0B /* ContentView.swift */; };
 		C94D25EDF600B61DE9551DE4 /* AudioSplitPlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1ED0054B5F87F7A7DA6CF2B /* AudioSplitPlanner.swift */; };
 		CCA0F61F9AECB6AE76B74507 /* TranscriptionLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CA4ABF824F14159A792C007 /* TranscriptionLogicTests.swift */; };
@@ -133,6 +135,7 @@
 		980E591FF520483287042BDE /* RTFCalibration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RTFCalibration.swift; sourceTree = "<group>"; };
 		9BFBA6DEA7C8C499A9C6AB0F /* SummarizationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummarizationService.swift; sourceTree = "<group>"; };
 		9C5ABA4A68E08F4DEB1A3296 /* AssemblyAITranscriptionEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssemblyAITranscriptionEngine.swift; sourceTree = "<group>"; };
+		A0E582311CF836C8B44978EB /* WindowedAudioLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowedAudioLoader.swift; sourceTree = "<group>"; };
 		A1D25CBB8A2FC74690700D40 /* RecordingStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingStore.swift; sourceTree = "<group>"; };
 		A32FFDE1B02352883DC8E686 /* OpenAITranscriptionEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAITranscriptionEngine.swift; sourceTree = "<group>"; };
 		A78FA8273D7B03F525B25009 /* AudioTranscriber9000.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AudioTranscriber9000.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -151,6 +154,7 @@
 		DF5FF1F6BDA58530A5832988 /* LegacySettingsMigrator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacySettingsMigrator.swift; sourceTree = "<group>"; };
 		E068E4148EACDE336BE958A8 /* WordTimingAssemblerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WordTimingAssemblerTests.swift; sourceTree = "<group>"; };
 		E1177F7F5B9E279111EA064A /* TranscriptionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionView.swift; sourceTree = "<group>"; };
+		EBB28223D6990C9D00C67B1C /* WindowedAudioLoaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowedAudioLoaderTests.swift; sourceTree = "<group>"; };
 		F0AEF0436FAA8EB4E7CDB62C /* MultipartFormData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultipartFormData.swift; sourceTree = "<group>"; };
 		FA667FE476024A2113507D0B /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		FC18FC9736BBC70FE65C7EAA /* AudioRecorderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorderTests.swift; sourceTree = "<group>"; };
@@ -226,6 +230,7 @@
 				5CA4ABF824F14159A792C007 /* TranscriptionLogicTests.swift */,
 				B54540EA072184CC5CE16F09 /* TranscriptionQueueTests.swift */,
 				6400575764B59450B6CD5F4B /* TranscriptionServiceTests.swift */,
+				EBB28223D6990C9D00C67B1C /* WindowedAudioLoaderTests.swift */,
 				E068E4148EACDE336BE958A8 /* WordTimingAssemblerTests.swift */,
 			);
 			name = AudioTranscriberTests;
@@ -279,6 +284,7 @@
 				3A0E5CFDA09C4E91AE18151A /* TranscriptionCheckpoint.swift */,
 				FF52D197E0BCB41721F4B816 /* TranscriptionEngine.swift */,
 				4311D651603E727892F3F664 /* TranscriptMerger.swift */,
+				A0E582311CF836C8B44978EB /* WindowedAudioLoader.swift */,
 				76862B769E69237CCF980E80 /* WordTimingAssembler.swift */,
 			);
 			path = Transcription;
@@ -496,6 +502,7 @@
 				27DFDC643D0C48496B48D014 /* TranscriptionEngine.swift in Sources */,
 				DE5F5E009C1F1483C9D25CAD /* TranscriptionService.swift in Sources */,
 				38F8158F1A2D54E1A54CC0C0 /* TranscriptionView.swift in Sources */,
+				7730C42AD2BC89AF9A564213 /* WindowedAudioLoader.swift in Sources */,
 				2CFB63B3913B7A4BA0C49749 /* WordTimingAssembler.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -518,6 +525,7 @@
 				CCA0F61F9AECB6AE76B74507 /* TranscriptionLogicTests.swift in Sources */,
 				5B091761C2C7B5673608688E /* TranscriptionQueueTests.swift in Sources */,
 				A2D0E1C3C7CBFAC187F9BE0F /* TranscriptionServiceTests.swift in Sources */,
+				C60A763836EC044FEC9FDCEC /* WindowedAudioLoaderTests.swift in Sources */,
 				8F2877D1F3D823D32145B3E5 /* WordTimingAssemblerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -269,7 +269,8 @@ struct ChatSessionView: View {
                 }
                 let response = streamingResponse.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !response.isEmpty {
-                    messages.append(ChatMessage(role: .assistant, content: response))
+                    messages.append(ChatMessage(role: .assistant, content: response,
+                                                modelUsed: provider.modelIdentity))
                 } else if !Task.isCancelled {
                     lastError = "The model returned an empty response."
                     lastFailedUserMessage = userText
@@ -279,14 +280,16 @@ struct ChatSessionView: View {
                 saveChat()
             } catch is CancellationError {
                 if !streamingResponse.isEmpty {
-                    messages.append(ChatMessage(role: .assistant, content: streamingResponse + " (interrupted)"))
+                    messages.append(ChatMessage(role: .assistant, content: streamingResponse + " (interrupted)",
+                                                modelUsed: provider.modelIdentity))
                     saveChat()
                 }
                 streamingResponse = ""
                 streamingReasoning = ""
             } catch {
                 if !streamingResponse.isEmpty {
-                    messages.append(ChatMessage(role: .assistant, content: streamingResponse + " (interrupted)"))
+                    messages.append(ChatMessage(role: .assistant, content: streamingResponse + " (interrupted)",
+                                                modelUsed: provider.modelIdentity))
                 }
                 streamingResponse = ""
                 streamingReasoning = ""
@@ -381,7 +384,7 @@ struct ChatBubble: View {
                     )
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-                Text(message.role == .user ? "You" : "AI")
+                Text(message.role == .user ? "You" : (message.modelUsed ?? "AI"))
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }

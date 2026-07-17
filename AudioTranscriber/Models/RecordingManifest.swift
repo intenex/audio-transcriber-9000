@@ -20,6 +20,7 @@ struct RecordingManifest: Codable {
         var status: TranscriptionStatus
         var name: String?
         var category: String?
+        var engineUsed: String?
     }
 
     init(schemaVersion: Int = RecordingManifest.currentSchemaVersion,
@@ -45,7 +46,8 @@ extension RecordingManifest.Entry {
             hasTranscription: recording.transcriptionURL != nil,
             status: recording.status,
             name: recording.name,
-            category: recording.category
+            category: recording.category,
+            engineUsed: recording.engineUsed
         )
     }
 
@@ -66,7 +68,7 @@ extension RecordingManifest.Entry {
         return Recording(
             id: id, fileURL: url, date: date, duration: duration,
             transcriptionURL: transcriptionURL, status: status,
-            name: name, category: category
+            name: name, category: category, engineUsed: engineUsed
         )
     }
 }

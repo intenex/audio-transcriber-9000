@@ -12,6 +12,11 @@ final class RecordingStore {
     var categories: [String] = []
     var errorMessage: String? = nil
 
+    /// Fired for genuinely NEW recordings entering the library (finished
+    /// recordings and imports — not migration/orphan adoption). Used for the
+    /// auto-transcribe setting.
+    var onRecordingAdded: ((UUID) -> Void)? = nil
+
     private(set) var storageDirectory: URL
 
     private let defaults: UserDefaults
@@ -151,6 +156,7 @@ final class RecordingStore {
         recordings.insert(recording, at: 0)
         recordings.sort { $0.date > $1.date }
         save()
+        onRecordingAdded?(recording.id)
     }
 
     func update(_ id: UUID, _ mutate: (inout Recording) -> Void) {

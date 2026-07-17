@@ -6,6 +6,7 @@ import Foundation
 final class AssemblyAITranscriptionEngine: TranscriptionEngine, @unchecked Sendable {
     let id = "cloud.assemblyai.universal"
     let kind = TranscriptionEngineKind.assemblyAI
+    let modelDescription = "AssemblyAI · universal"
 
     static let baseURL = URL(string: "https://api.assemblyai.com/v2")!
     static let pollInterval: Duration = .seconds(3)

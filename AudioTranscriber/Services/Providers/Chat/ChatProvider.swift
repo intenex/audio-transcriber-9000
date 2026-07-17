@@ -55,6 +55,8 @@ enum ChatProviderError: LocalizedError {
 protocol ChatProvider: AnyObject {
     var id: ChatProviderID { get }
     var displayName: String { get }
+    /// The concrete model name for attribution (e.g. "MiniMax-M3", "gpt-4o-mini").
+    var modelIdentity: String { get }
     /// How much context (characters) consumers may stuff into prompts.
     var contextCharacterBudget: Int { get }
     var isConfigured: Bool { get }

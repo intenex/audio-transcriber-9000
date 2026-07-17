@@ -40,6 +40,8 @@ final class OpenAICompatibleChatProvider: ChatProvider {
         secrets.has(secretKey) && baseURLProvider() != nil
     }
 
+    var modelIdentity: String { modelProvider() }
+
     // MARK: - Streaming
 
     private struct StreamChunk: Decodable {

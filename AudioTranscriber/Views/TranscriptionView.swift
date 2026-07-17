@@ -97,6 +97,14 @@ struct TranscriptionView: View {
             }
         }
         .onAppear { loadMarkdown() }
+        .onChange(of: recording.id) { _, _ in
+            // Detail view identity persists across sidebar selection changes —
+            // reset per-recording state or the previous recording's leaks through.
+            transcriptSearchQuery = ""
+            editingSpeakerID = nil
+            isEditingName = false
+            loadMarkdown()
+        }
         .onChange(of: recording.status) { _, _ in loadMarkdown() }
         .onChange(of: recording.transcriptionURL) { _, _ in loadMarkdown() }
         .sheet(item: $cloudConfirmKind) { kind in
@@ -159,6 +167,12 @@ struct TranscriptionView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     statusPill
+                    if let engine = recording.engineUsed {
+                        Label(engine, systemImage: "cpu")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .help("Transcribed with \(engine)")
+                    }
                 }
             }
 
@@ -621,6 +635,7 @@ struct TranscriptionView: View {
             }
 
             InteractiveTranscriptView(
+                contentID: recording.id.uuidString,
                 segments: segs,
                 currentTime: audioRecorder.playbackTime,
                 isPlaying: isPlayingThis,
@@ -849,32 +864,61 @@ struct TranscriptionView: View {
     private var summaryTabContent: some View {
         if let summary = loadedSummary {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    // Summary section
+                VStack(alignment: .leading, spacing: 22) {
+                    // Topics tags
+                    if let topics = summary.topics, !topics.isEmpty {
+                        HStack(spacing: 6) {
+                            ForEach(topics, id: \.self) { topic in
+                                Text(topic)
+                                    .font(.caption.weight(.medium))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 4)
+                                    .background(AppTheme.accent.opacity(0.1), in: Capsule())
+                                    .foregroundStyle(AppTheme.accent)
+                            }
+                            Spacer()
+                        }
+                    }
+
+                    // Summary section (markdown-rendered)
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Summary")
-                            .font(.title3.weight(.semibold))
-                        Text(summary.summary)
+                        summarySectionHeader("Summary", icon: "doc.text")
+                        Text(attributedMarkdown(summary.summary))
                             .textSelection(.enabled)
+                            .lineSpacing(3)
+                    }
+
+                    // Key Points
+                    if let keyPoints = summary.keyPoints, !keyPoints.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            summarySectionHeader("Key Points", icon: "list.bullet")
+                            ForEach(keyPoints, id: \.self) { point in
+                                bulletRow(icon: "smallcircle.filled.circle", tint: AppTheme.accent, text: point)
+                            }
+                        }
+                    }
+
+                    // Decisions
+                    if let decisions = summary.decisions, !decisions.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            summarySectionHeader("Decisions", icon: "checkmark.seal")
+                            ForEach(decisions, id: \.self) { decision in
+                                bulletRow(icon: "checkmark.seal.fill", tint: AppTheme.success, text: decision)
+                            }
+                        }
                     }
 
                     // Action Items
                     if !summary.actionItems.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Action Items")
-                                .font(.title3.weight(.semibold))
+                            summarySectionHeader("Action Items", icon: "checklist")
                             ForEach(summary.actionItems, id: \.self) { item in
-                                HStack(alignment: .top, spacing: 8) {
-                                    Image(systemName: "circle")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                        .padding(.top, 4)
-                                    Text(item)
-                                        .textSelection(.enabled)
-                                }
+                                bulletRow(icon: "circle", tint: AppTheme.warning, text: item)
                             }
                         }
                     }
+
+                    Divider()
 
                     // Generated name
                     HStack {
@@ -892,19 +936,20 @@ struct TranscriptionView: View {
                         }
                     }
 
-                    // Regenerate
-                    if chatService.isActiveProviderReady {
-                        Button(action: { Task { await regenerateSummary() } }) {
-                            Label("Regenerate Summary", systemImage: "arrow.counterclockwise")
-                                .font(.subheadline)
+                    // Regenerate + attribution footer
+                    HStack(spacing: 12) {
+                        if chatService.isActiveProviderReady {
+                            Button(action: { Task { await regenerateSummary() } }) {
+                                Label("Regenerate Summary", systemImage: "arrow.counterclockwise")
+                                    .font(.subheadline)
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(isRegeneratingSummary)
                         }
-                        .buttonStyle(.bordered)
-                        .disabled(isRegeneratingSummary)
+                        Text("Generated \(summary.generatedAt.formatted())\(summary.modelUsed.map { " · \($0)" } ?? "")")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
                     }
-
-                    Text("Generated \(summary.generatedAt.formatted())")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
                 }
                 .padding(24)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -943,6 +988,23 @@ struct TranscriptionView: View {
                     .font(.subheadline)
                     .foregroundStyle(.tertiary)
             }
+        }
+    }
+
+    private func summarySectionHeader(_ title: String, icon: String) -> some View {
+        Label(title, systemImage: icon)
+            .font(.title3.weight(.semibold))
+            .labelStyle(.titleAndIcon)
+    }
+
+    private func bulletRow(icon: String, tint: Color, text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundStyle(tint)
+                .padding(.top, 3)
+            Text(attributedMarkdown(text))
+                .textSelection(.enabled)
         }
     }
 
@@ -1024,7 +1086,9 @@ struct TranscriptionView: View {
 
         do {
             let summary = try await SummarizationService.summarize(
-                transcript: content, provider: chatService.activeProvider)
+                transcript: content,
+                provider: chatService.activeProvider,
+                namingContext: transcriptionService.namingContext(for: recording))
             SummarizationService.saveSummary(summary, for: recording)
             await MainActor.run { loadedSummary = summary }
 
@@ -1175,20 +1239,36 @@ struct TranscriptionView: View {
         let title = recording.name ?? "Recording — \(recording.formattedDate)"
         lines.append("# Summary: \(title)")
         lines.append("")
+        if let topics = summary.topics, !topics.isEmpty {
+            lines.append("**Topics:** \(topics.joined(separator: ", "))")
+            lines.append("")
+        }
         lines.append("## Summary")
         lines.append("")
         lines.append(summary.summary)
         lines.append("")
+        if let keyPoints = summary.keyPoints, !keyPoints.isEmpty {
+            lines.append("## Key Points")
+            lines.append("")
+            for point in keyPoints { lines.append("- \(point)") }
+            lines.append("")
+        }
+        if let decisions = summary.decisions, !decisions.isEmpty {
+            lines.append("## Decisions")
+            lines.append("")
+            for decision in decisions { lines.append("- \(decision)") }
+            lines.append("")
+        }
         if !summary.actionItems.isEmpty {
             lines.append("## Action Items")
             lines.append("")
             for item in summary.actionItems {
-                lines.append("- \(item)")
+                lines.append("- [ ] \(item)")
             }
             lines.append("")
         }
         lines.append("---")
-        lines.append("*Generated \(summary.generatedAt.formatted())*")
+        lines.append("*Generated \(summary.generatedAt.formatted())\(summary.modelUsed.map { " with \($0)" } ?? "")*")
 
         let content = lines.joined(separator: "\n")
         let panel = NSSavePanel()

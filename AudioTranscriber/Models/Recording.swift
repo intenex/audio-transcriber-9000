@@ -35,10 +35,13 @@ struct Recording: Identifiable, Codable {
     var status: TranscriptionStatus
     var name: String?
     var category: String?
+    /// Human-readable engine/model that produced the transcript, e.g.
+    /// "On-Device · Parakeet v3". Optional for pre-existing data.
+    var engineUsed: String?
 
     init(id: UUID = UUID(), fileURL: URL, date: Date = .now, duration: TimeInterval = 0,
          transcriptionURL: URL? = nil, status: TranscriptionStatus = .pending,
-         name: String? = nil, category: String? = nil) {
+         name: String? = nil, category: String? = nil, engineUsed: String? = nil) {
         self.id = id
         self.fileURL = fileURL
         self.date = date
@@ -47,6 +50,7 @@ struct Recording: Identifiable, Codable {
         self.status = status
         self.name = name
         self.category = category
+        self.engineUsed = engineUsed
     }
 
     var displayName: String {

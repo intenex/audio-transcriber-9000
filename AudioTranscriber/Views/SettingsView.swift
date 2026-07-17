@@ -75,7 +75,7 @@ struct GeneralSettingsTab: View {
     @AppStorage("defaultTranscriptionEngine") private var defaultEngine = TranscriptionEngineKind.local.rawValue
     @AppStorage("confirmCloudTranscription") private var confirmCloud = true
     @AppStorage("autoSummarize") private var autoSummarize = true
-    @AppStorage("autoTranscribeNewRecordings") private var autoTranscribe = false
+    @AppStorage("autoTranscribeNewRecordings") private var autoTranscribe = true
     @AppStorage("liveTranscriptionPreview") private var livePreview = true
 
     var body: some View {
@@ -171,7 +171,7 @@ struct TranscriptionSettingsTab: View {
 struct AIChatSettingsTab: View {
     @Environment(ChatService.self) private var chatService
     @AppStorage("chatProviderID") private var selectedProvider = ""
-    @AppStorage("miniMaxModel") private var miniMaxModel = "MiniMax-M2"
+    @AppStorage("miniMaxModel") private var miniMaxModel = "MiniMax-M3"
     @AppStorage("openAIChatModel") private var openAIChatModel = "gpt-4o-mini"
     @AppStorage("customChatBaseURL") private var customBaseURL = ""
     @AppStorage("customChatModel") private var customModel = ""

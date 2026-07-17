@@ -35,6 +35,7 @@ enum CloudTranscriptionError: LocalizedError {
 final class OpenAITranscriptionEngine: TranscriptionEngine, @unchecked Sendable {
     let id = "cloud.openai.gpt-4o-transcribe-diarize"
     let kind = TranscriptionEngineKind.openAI
+    let modelDescription = "OpenAI · gpt-4o-transcribe-diarize"
 
     static let model = "gpt-4o-transcribe-diarize"
     static let maxKnownSpeakers = 4

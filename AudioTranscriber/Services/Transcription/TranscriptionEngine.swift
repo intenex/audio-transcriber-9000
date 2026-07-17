@@ -77,6 +77,8 @@ protocol TranscriptionEngine: Sendable {
     /// Stable identifier used as the realtime-factor calibration key.
     var id: String { get }
     var kind: TranscriptionEngineKind { get }
+    /// Human-readable engine + model for attribution, e.g. "On-Device · Parakeet v3".
+    var modelDescription: String { get }
 
     /// Ensure models/credentials are ready. Idempotent; reports .downloadingModels progress.
     func prepare(progress: @escaping @Sendable (TranscriptionProgress) -> Void) async throws
