@@ -3,7 +3,7 @@ options:
   bundleIdPrefix: com.audiotranscriber9000
   deploymentTarget:
     macOS: "14.0"
-  xcodeVersion: "15.0"
+  xcodeVersion: "16.0"
   generateEmptyDirectories: true
 
 settings:
@@ -14,15 +14,23 @@ settings:
     DEVELOPMENT_TEAM: ""
     CODE_SIGN_STYLE: Automatic
 
+packages:
+  FluidAudio:
+    url: https://github.com/FluidInference/FluidAudio.git
+    exactVersion: 0.12.4
+
 targets:
   AudioTranscriber9000:
     type: application
     platform: macOS
     sources:
       - AudioTranscriber
+    dependencies:
+      - package: FluidAudio
     settings:
       base:
         PRODUCT_NAME: "Audio Transcriber 9000"
+        PRODUCT_MODULE_NAME: AudioTranscriber
         INFOPLIST_FILE: AudioTranscriber/Info.plist
         CODE_SIGN_ENTITLEMENTS: AudioTranscriber/AudioTranscriber.entitlements
         ENABLE_HARDENED_RUNTIME: YES
@@ -46,6 +54,18 @@ targets:
     settings:
       base:
         PRODUCT_NAME: AudioTranscriberTests
-        INFOPLIST_FILE: ""
+        GENERATE_INFOPLIST_FILE: YES
         BUNDLE_LOADER: "$(TEST_HOST)"
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Audio Transcriber 9000.app/Contents/MacOS/Audio Transcriber 9000"
+
+schemes:
+  AudioTranscriber9000:
+    build:
+      targets:
+        AudioTranscriber9000: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - AudioTranscriberTests

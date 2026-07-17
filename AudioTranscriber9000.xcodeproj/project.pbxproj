@@ -16,6 +16,7 @@
 		415F49E4A23F933AB4479835 /* AudioRecorderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC18FC9736BBC70FE65C7EAA /* AudioRecorderTests.swift */; };
 		4F3479068146E26BD1E53CEC /* ChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46FF6FEF5D62CAF672578C81 /* ChatMessage.swift */; };
 		4F4BA4BF68B0E2D0445A31C1 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C1E10A4E28EDE13500BA24F /* ChatView.swift */; };
+		6E28092A63152D1745F8EB15 /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = 333F0E7DD5B8B03E24A9D41B /* FluidAudio */; };
 		8C4EB66706392144CF344E23 /* AudioTranscriberApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9577C6CBEC3C32D16F1AF8D /* AudioTranscriberApp.swift */; };
 		8CEAF1DB6549279321B446A7 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88D2BFB3E06E56948A2CFF62 /* Theme.swift */; };
 		A26165E8DA82FDEC247CD4B6 /* GlobalChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3288B9D5EDC565361A92583 /* GlobalChatView.swift */; };
@@ -69,6 +70,17 @@
 		FA667FE476024A2113507D0B /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		FC18FC9736BBC70FE65C7EAA /* AudioRecorderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorderTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		DB4EB4A8577DEDB7E1E446CE /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6E28092A63152D1745F8EB15 /* FluidAudio in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		07034FA9DBA12F6E32200871 /* Products */ = {
@@ -169,6 +181,7 @@
 			buildPhases = (
 				72D8CEE1D10A193857F1E3AB /* Sources */,
 				49E559281ACC8B2142F052DF /* Resources */,
+				DB4EB4A8577DEDB7E1E446CE /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -176,6 +189,7 @@
 			);
 			name = AudioTranscriber9000;
 			packageProductDependencies = (
+				333F0E7DD5B8B03E24A9D41B /* FluidAudio */,
 			);
 			productName = AudioTranscriber9000;
 			productReference = A78FA8273D7B03F525B25009 /* AudioTranscriber9000.app */;
@@ -206,7 +220,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 1500;
+				LastUpgradeCheck = 1600;
 				TargetAttributes = {
 					29A89030768F4FEAE46D8241 = {
 						DevelopmentTeam = "";
@@ -227,6 +241,9 @@
 			);
 			mainGroup = 48B60C0BD192215E63C68F18;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				0073A2F72CE7263B7D4F6FBE /* XCRemoteSwiftPackageReference "FluidAudio" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 07034FA9DBA12F6E32200871 /* Products */;
 			projectDirPath = "";
@@ -309,6 +326,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				PRODUCT_MODULE_NAME = AudioTranscriber;
 				PRODUCT_NAME = "Audio Transcriber 9000";
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -320,7 +338,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				COMBINE_HIDPI_IMAGES = YES;
-				INFOPLIST_FILE = "";
+				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -337,7 +355,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				COMBINE_HIDPI_IMAGES = YES;
-				INFOPLIST_FILE = "";
+				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -362,6 +380,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				PRODUCT_MODULE_NAME = AudioTranscriber;
 				PRODUCT_NAME = "Audio Transcriber 9000";
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -524,6 +543,25 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		0073A2F72CE7263B7D4F6FBE /* XCRemoteSwiftPackageReference "FluidAudio" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/FluidInference/FluidAudio.git";
+			requirement = {
+				kind = exactVersion;
+				version = 0.12.4;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		333F0E7DD5B8B03E24A9D41B /* FluidAudio */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0073A2F72CE7263B7D4F6FBE /* XCRemoteSwiftPackageReference "FluidAudio" */;
+			productName = FluidAudio;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = EB9A6ACEA1924BE60890747B /* Project object */;
 }

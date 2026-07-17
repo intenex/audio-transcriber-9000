@@ -1,29 +1,48 @@
 import Foundation
 
-struct TranscriptionWord: Codable {
+struct TranscriptionWord: Codable, Equatable {
     let word: String
     let start: Double?
     let end: Double?
+
+    init(word: String, start: Double?, end: Double?) {
+        self.word = word
+        self.start = start
+        self.end = end
+    }
 }
 
-struct TranscriptionSegment: Codable {
+struct TranscriptionSegment: Codable, Equatable {
     let start: TimeInterval
     let end: TimeInterval
     let text: String
     let speaker: String
     let words: [TranscriptionWord]
 
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        start = try c.decode(TimeInterval.self, forKey: .start)
-        end = try c.decode(TimeInterval.self, forKey: .end)
-        text = try c.decode(String.self, forKey: .text)
-        speaker = try c.decode(String.self, forKey: .speaker)
-        words = (try? c.decode([TranscriptionWord].self, forKey: .words)) ?? []
+    init(start: TimeInterval, end: TimeInterval, text: String, speaker: String, words: [TranscriptionWord] = []) {
+        self.start = start
+        self.end = end
+        self.text = text
+        self.speaker = speaker
+        self.words = words
     }
 
     enum CodingKeys: String, CodingKey {
         case start, end, text, speaker, words
+    }
+}
+
+extension TranscriptionSegment {
+    // Custom decoder: `words` is absent in segments.json files written before
+    // word-level timestamps existed, so it must decode as optional-with-default.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let start = try c.decode(TimeInterval.self, forKey: .start)
+        let end = try c.decode(TimeInterval.self, forKey: .end)
+        let text = try c.decode(String.self, forKey: .text)
+        let speaker = try c.decode(String.self, forKey: .speaker)
+        let words = (try? c.decode([TranscriptionWord].self, forKey: .words)) ?? []
+        self.init(start: start, end: end, text: text, speaker: speaker, words: words)
     }
 }
 
