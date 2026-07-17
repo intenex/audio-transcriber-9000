@@ -1,13 +1,14 @@
 import SwiftUI
 
 struct ContentView: View {
+    @Environment(RecordingStore.self) private var store
     @Environment(AudioRecorder.self) private var audioRecorder
     @Environment(TranscriptionService.self) private var transcriptionService
     @State private var selectedRecordingID: UUID? = nil
     @State private var showGlobalChat = false
 
     var selectedRecording: Recording? {
-        audioRecorder.recordings.first { $0.id == selectedRecordingID }
+        store.recordings.first { $0.id == selectedRecordingID }
     }
 
     var body: some View {

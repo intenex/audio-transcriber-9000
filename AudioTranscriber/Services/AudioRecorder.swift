@@ -4,6 +4,8 @@ import AVFAudio
 import Foundation
 import Observation
 
+/// Records audio via AVAudioEngine and plays recordings back. Library state
+/// (the recordings list, import, delete, persistence) lives in RecordingStore.
 @Observable
 final class AudioRecorder: NSObject {
     var isRecording = false
@@ -11,10 +13,10 @@ final class AudioRecorder: NSObject {
     var playingRecordingID: UUID? = nil
     var recordingDuration: TimeInterval = 0
     var playbackTime: Double = 0.0
-    var recordings: [Recording] = []
+    var playbackRate: Float = Float(UserDefaults.standard.object(forKey: "playbackRate") as? Double ?? 1.0)
     var errorMessage: String? = nil
 
-    private var audioRecorder: AVAudioRecorder?
+    private weak var store: RecordingStore?
     private var audioEngine: AVAudioEngine?
     private var audioFile: AVAudioFile?
     private var audioPlayer: AVAudioPlayer?
@@ -22,21 +24,14 @@ final class AudioRecorder: NSObject {
     private var playbackTimer: Timer?
     private var currentRecordingURL: URL?
     private var recordingStartDate: Date?
+    private var sleepGuard: SleepGuard? = nil
 
-    var storageDirectory: URL {
-        if let custom = UserDefaults.standard.string(forKey: "storageDirectory"),
-           !custom.isEmpty {
-            let url = URL(fileURLWithPath: custom, isDirectory: true)
-            try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-            return url
-        }
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let dir = docs.appendingPathComponent("AudioTranscriber", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
+    @MainActor
+    func attach(store: RecordingStore) {
+        self.store = store
     }
 
-    // MARK: - Public
+    // MARK: - Permissions
 
     func requestMicPermission() {
         NSLog("[AudioRecorder] Requesting mic permission...")
@@ -60,11 +55,15 @@ final class AudioRecorder: NSObject {
         }
     }
 
+    // MARK: - Recording
+
+    @MainActor
     func startRecording() {
         guard !isRecording else { return }
+        guard let store else { return }
 
         let filename = "recording_\(dateString()).wav"
-        let url = storageDirectory.appendingPathComponent(filename)
+        let url = store.storageDirectory.appendingPathComponent(filename)
         currentRecordingURL = url
         NSLog("[AudioRecorder] Starting recording to: \(url.path)")
 
@@ -89,18 +88,50 @@ final class AudioRecorder: NSObject {
                 let inputFormat = inputNode.outputFormat(forBus: 0)
                 NSLog("[AudioRecorder] Input format: \(inputFormat)")
 
-                // Write in the native input format — whisperX resamples automatically.
-                // Using a custom format with AVAudioConverter + AVAudioFile causes internal
-                // CoreAudio assertion failures (ExtAudioFile::WriteInputProc) when the
-                // buffer format doesn't match the file's processingFormat.
-                let file = try AVAudioFile(forWriting: url, settings: inputFormat.settings)
+                // Write 16-bit PCM (half the size of Float32) while keeping the tap
+                // in the native input format. The AVAudioFile's processingFormat is
+                // pinned to the tap format via commonFormat:, so ExtAudioFile performs
+                // the Float32→Int16 conversion internally — no AVAudioConverter in the
+                // tap callback (which historically crashed).
+                let file: AVAudioFile
+                if inputFormat.commonFormat == .pcmFormatFloat32 {
+                    var settings = inputFormat.settings
+                    settings[AVFormatIDKey] = kAudioFormatLinearPCM
+                    settings[AVLinearPCMBitDepthKey] = 16
+                    settings[AVLinearPCMIsFloatKey] = false
+                    settings[AVLinearPCMIsBigEndianKey] = false
+                    settings[AVLinearPCMIsNonInterleaved] = false
+                    file = try AVAudioFile(forWriting: url, settings: settings,
+                                           commonFormat: .pcmFormatFloat32,
+                                           interleaved: false)
+                } else {
+                    // Unexpected tap format — fall back to writing the native format.
+                    file = try AVAudioFile(forWriting: url, settings: inputFormat.settings)
+                }
 
+                var firstWriteError: Error? = nil
+                var didAttemptFirstWrite = false
                 inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
-                    try? file.write(from: buffer)
+                    do {
+                        try file.write(from: buffer)
+                    } catch {
+                        if !didAttemptFirstWrite { firstWriteError = error }
+                    }
+                    didAttemptFirstWrite = true
                 }
 
                 engine.prepare()
                 try engine.start()
+
+                // Give the tap a moment to deliver the first buffer so a broken
+                // write path surfaces immediately instead of producing a 4KB file.
+                try await Task.sleep(for: .milliseconds(300))
+                if let error = firstWriteError {
+                    engine.inputNode.removeTap(onBus: 0)
+                    engine.stop()
+                    throw error
+                }
+
                 NSLog("[AudioRecorder] AVAudioEngine started on background thread")
                 return (engine, file)
             }.value
@@ -111,6 +142,7 @@ final class AudioRecorder: NSObject {
             self.isRecording = true
             self.recordingDuration = 0
             self.recordingStartDate = Date()
+            self.sleepGuard = SleepGuard(reason: "Recording audio")
             self.startTimer()
             NSLog("[AudioRecorder] Recording state updated")
         } catch {
@@ -119,31 +151,40 @@ final class AudioRecorder: NSObject {
         }
     }
 
+    @MainActor
     @discardableResult
     func stopRecording() -> Recording? {
         guard isRecording, let url = currentRecordingURL else { return nil }
 
-        // Stop AVAudioEngine-based recording
+        var writtenFrames: AVAudioFramePosition = 0
+        var sampleRate: Double = 0
         if let engine = audioEngine {
             engine.inputNode.removeTap(onBus: 0)
             engine.stop()
+            if let file = audioFile {
+                writtenFrames = file.length
+                sampleRate = file.processingFormat.sampleRate
+            }
             audioEngine = nil
             audioFile = nil
         }
-        // Stop legacy AVAudioRecorder-based recording
-        audioRecorder?.stop()
 
         stopTimer()
         isRecording = false
+        sleepGuard = nil
 
-        let duration = recordingDuration
+        // Authoritative duration = frames actually written; wall-clock as fallback.
+        let fileDuration = sampleRate > 0 ? Double(writtenFrames) / sampleRate : 0
+        let wallClock = recordingStartDate.map { Date().timeIntervalSince($0) } ?? recordingDuration
+        let duration = fileDuration > 0 ? fileDuration : wallClock
         let date = recordingStartDate ?? Date()
         let recording = Recording(fileURL: url, date: date, duration: duration)
 
-        recordings.insert(recording, at: 0)
-        saveRecordings()
+        store?.insert(recording)
         return recording
     }
+
+    // MARK: - Playback
 
     func playRecording(_ recording: Recording) {
         if isPlaying, playingRecordingID == recording.id {
@@ -154,6 +195,8 @@ final class AudioRecorder: NSObject {
         do {
             audioPlayer = try AVAudioPlayer(contentsOf: recording.fileURL)
             audioPlayer?.delegate = self
+            audioPlayer?.enableRate = true
+            audioPlayer?.rate = playbackRate
             audioPlayer?.play()
             isPlaying = true
             playingRecordingID = recording.id
@@ -173,6 +216,8 @@ final class AudioRecorder: NSObject {
         do {
             audioPlayer = try AVAudioPlayer(contentsOf: recording.fileURL)
             audioPlayer?.delegate = self
+            audioPlayer?.enableRate = true
+            audioPlayer?.rate = playbackRate
             audioPlayer?.currentTime = time
             audioPlayer?.play()
             isPlaying = true
@@ -184,6 +229,19 @@ final class AudioRecorder: NSObject {
         }
     }
 
+    /// Seek without changing play/pause state (used by the scrubber).
+    func seek(to time: TimeInterval) {
+        guard let player = audioPlayer else { return }
+        player.currentTime = time
+        playbackTime = time
+    }
+
+    func setPlaybackRate(_ rate: Float) {
+        playbackRate = rate
+        UserDefaults.standard.set(Double(rate), forKey: "playbackRate")
+        audioPlayer?.rate = rate
+    }
+
     func stopPlayback() {
         audioPlayer?.stop()
         audioPlayer = nil
@@ -193,74 +251,13 @@ final class AudioRecorder: NSObject {
         playbackTime = 0.0
     }
 
-    func deleteRecording(_ recording: Recording) {
-        try? FileManager.default.removeItem(at: recording.fileURL)
-        if let markdownURL = recording.transcriptionURL {
-            try? FileManager.default.removeItem(at: markdownURL)
-        }
-        // Delete sidecar files (summary, chat, segments, speakers)
-        let summaryURL = recording.fileURL.deletingPathExtension().appendingPathExtension("summary.json")
-        let chatURL = recording.fileURL.deletingPathExtension().appendingPathExtension("chat.json")
-        let segmentsURL = recording.fileURL.deletingPathExtension().appendingPathExtension("segments.json")
-        let speakersURL = recording.fileURL.deletingPathExtension().appendingPathExtension("speakers.json")
-        try? FileManager.default.removeItem(at: summaryURL)
-        try? FileManager.default.removeItem(at: chatURL)
-        try? FileManager.default.removeItem(at: segmentsURL)
-        try? FileManager.default.removeItem(at: speakersURL)
-
-        recordings.removeAll { $0.id == recording.id }
-        saveRecordings()
-    }
-
-    func showInFinder(_ recording: Recording) {
-        NSWorkspace.shared.activateFileViewerSelecting([recording.fileURL])
-    }
-
-    func importAudioFiles() {
-        let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = true
-        panel.canChooseDirectories = false
-        panel.allowedContentTypes = [
-            .audio, .wav, .mp3, .mpeg4Audio, .aiff,
-        ]
-        panel.message = "Select audio files to import for transcription"
-
-        guard panel.runModal() == .OK else { return }
-
-        for sourceURL in panel.urls {
-            let filename = sourceURL.lastPathComponent
-            let destURL = storageDirectory.appendingPathComponent(filename)
-
-            // Avoid overwriting — add suffix if needed
-            let finalURL = uniqueURL(for: destURL)
-
-            do {
-                try FileManager.default.copyItem(at: sourceURL, to: finalURL)
-                let duration = audioDuration(for: finalURL)
-                let recording = Recording(fileURL: finalURL, date: Date(), duration: duration)
-                recordings.insert(recording, at: 0)
-            } catch {
-                errorMessage = "Failed to import \(filename): \(error.localizedDescription)"
-            }
-        }
-        saveRecordings()
-    }
-
-    func loadRecordings() {
-        guard let data = UserDefaults.standard.data(forKey: "recordings"),
-              let saved = try? JSONDecoder().decode([Recording].self, from: data) else {
-            return
-        }
-        // Filter out recordings whose files no longer exist
-        recordings = saved.filter { FileManager.default.fileExists(atPath: $0.fileURL.path) }
-    }
-
     // MARK: - Private
 
     private func startTimer() {
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            self.recordingDuration += 0.1
+            guard let self, let start = self.recordingStartDate else { return }
+            // Wall-clock, not accumulation — immune to timer drift on long recordings.
+            self.recordingDuration = Date().timeIntervalSince(start)
         }
     }
 
@@ -287,34 +284,9 @@ final class AudioRecorder: NSObject {
         f.dateFormat = "yyyy-MM-dd_HH-mm-ss"
         return f.string(from: Date())
     }
-
-    func saveRecordings() {
-        if let data = try? JSONEncoder().encode(recordings) {
-            UserDefaults.standard.set(data, forKey: "recordings")
-        }
-    }
-
-    private func uniqueURL(for url: URL) -> URL {
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: url.path) else { return url }
-        let dir = url.deletingLastPathComponent()
-        let stem = url.deletingPathExtension().lastPathComponent
-        let ext = url.pathExtension
-        var counter = 1
-        while true {
-            let candidate = dir.appendingPathComponent("\(stem)_\(counter).\(ext)")
-            if !fm.fileExists(atPath: candidate.path) { return candidate }
-            counter += 1
-        }
-    }
-
-    private func audioDuration(for url: URL) -> TimeInterval {
-        let asset = AVURLAsset(url: url)
-        return CMTimeGetSeconds(asset.duration)
-    }
 }
 
-// MARK: - AVAudioRecorderDelegate
+// MARK: - AVAudioPlayerDelegate
 
 extension AudioRecorder: AVAudioPlayerDelegate {
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
@@ -322,21 +294,5 @@ extension AudioRecorder: AVAudioPlayerDelegate {
         playingRecordingID = nil
         stopPlaybackTimer()
         playbackTime = 0.0
-    }
-}
-
-extension AudioRecorder: AVAudioRecorderDelegate {
-    func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
-        if !flag {
-            errorMessage = "Recording finished unsuccessfully."
-            isRecording = false
-            stopTimer()
-        }
-    }
-
-    func audioRecorderEncodeErrorDidOccur(_ recorder: AVAudioRecorder, error: Error?) {
-        errorMessage = "Recording encode error: \(error?.localizedDescription ?? "unknown")"
-        isRecording = false
-        stopTimer()
     }
 }

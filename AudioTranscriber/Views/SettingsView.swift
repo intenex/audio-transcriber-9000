@@ -75,6 +75,7 @@ struct GeneralSettingsTab: View {
 // MARK: - Storage Tab
 
 struct StorageSettingsTab: View {
+    @Environment(RecordingStore.self) private var store
     @AppStorage("storageDirectory") private var storageDirectory = ""
 
     var body: some View {
@@ -105,11 +106,14 @@ struct StorageSettingsTab: View {
                     }
                 }
 
-                Text("Where new recordings and imported audio files are saved.")
+                Text("Where new recordings and imported audio files are saved. Changing this switches to the library in that folder.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } header: {
                 Label("Storage Location", systemImage: "folder.fill")
+            }
+            .onChange(of: storageDirectory) { _, _ in
+                store.reloadFromStorageDirectory()
             }
 
             Section {

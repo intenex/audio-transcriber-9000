@@ -9,6 +9,7 @@ enum DetailTab: String, CaseIterable {
 
 struct TranscriptionView: View {
     let recording: Recording
+    @Environment(RecordingStore.self) private var store
     @Environment(TranscriptionService.self) private var transcriptionService
     @Environment(AudioRecorder.self) private var audioRecorder
     @Environment(LLMService.self) private var llmService
@@ -53,7 +54,7 @@ struct TranscriptionView: View {
             // Content
             Group {
                 switch recording.status {
-                case .pending:
+                case .pending, .paused, .partial:
                     pendingView
                 case .processing:
                     processingView
@@ -90,7 +91,7 @@ struct TranscriptionView: View {
         .alert("Delete Recording?", isPresented: $showingDeleteConfirm) {
             Button("Delete", role: .destructive) {
                 audioRecorder.stopPlayback()
-                audioRecorder.deleteRecording(recording)
+                store.delete(recording)
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -177,6 +178,20 @@ struct TranscriptionView: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 2)
                 .background(AppTheme.recording.opacity(0.12), in: Capsule())
+        case .paused:
+            Text("Paused")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(AppTheme.warning)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 2)
+                .background(AppTheme.warning.opacity(0.12), in: Capsule())
+        case .partial:
+            Text("Partially transcribed")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(AppTheme.warning)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 2)
+                .background(AppTheme.warning.opacity(0.12), in: Capsule())
         case .pending:
             EmptyView()
         }
@@ -239,9 +254,10 @@ struct TranscriptionView: View {
                 .fixedSize()
             }
 
-            if recording.status == .pending || recording.status == .failed {
+            if recording.status.canStartTranscription {
                 Button(action: { Task { await transcribeRecording() } }) {
-                    Label("Transcribe", systemImage: "waveform.badge.mic")
+                    Label(recording.status.isResumable ? "Resume" : "Transcribe",
+                          systemImage: "waveform.badge.mic")
                         .font(.subheadline.weight(.semibold))
                 }
                 .buttonStyle(.borderedProminent)
@@ -267,7 +283,7 @@ struct TranscriptionView: View {
             }
 
             // Show in Finder
-            Button(action: { audioRecorder.showInFinder(recording) }) {
+            Button(action: { store.showInFinder(recording) }) {
                 Image(systemName: "folder")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -294,14 +310,16 @@ struct TranscriptionView: View {
                 Circle()
                     .fill(AppTheme.accent.opacity(0.08))
                     .frame(width: 100, height: 100)
-                Image(systemName: "text.magnifyingglass")
+                Image(systemName: recording.status.isResumable ? "arrow.trianglehead.clockwise.rotate.90" : "text.magnifyingglass")
                     .font(.system(size: 40, weight: .light))
                     .foregroundStyle(AppTheme.accent.opacity(0.6))
             }
-            Text("Ready to transcribe")
+            Text(recording.status.isResumable ? "Transcription in progress — paused" : "Ready to transcribe")
                 .font(.title3.weight(.medium))
                 .foregroundStyle(.secondary)
-            Text("Click Transcribe to convert speech to text with speaker detection")
+            Text(recording.status.isResumable
+                 ? "Partial progress is saved. Resume to continue where it left off."
+                 : "Click Transcribe to convert speech to text with speaker detection")
                 .font(.subheadline)
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
@@ -309,7 +327,7 @@ struct TranscriptionView: View {
             Button(action: { Task { await transcribeRecording() } }) {
                 HStack(spacing: 6) {
                     Image(systemName: "waveform.badge.mic")
-                    Text("Transcribe Now")
+                    Text(recording.status.isResumable ? "Resume Transcription" : "Transcribe Now")
                 }
                 .font(.body.weight(.semibold))
                 .frame(width: 180, height: 40)
@@ -609,10 +627,7 @@ struct TranscriptionView: View {
                             .font(.caption.weight(.medium))
                         if recording.name == nil {
                             Button("Use") {
-                                if let idx = audioRecorder.recordings.firstIndex(where: { $0.id == recording.id }) {
-                                    audioRecorder.recordings[idx].name = summary.generatedName
-                                    audioRecorder.saveRecordings()
-                                }
+                                store.update(recording.id) { $0.name = summary.generatedName }
                             }
                             .font(.caption)
                             .buttonStyle(.bordered)
@@ -741,10 +756,7 @@ struct TranscriptionView: View {
     private func saveName() {
         isEditingName = false
         let trimmed = editName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let idx = audioRecorder.recordings.firstIndex(where: { $0.id == recording.id }) {
-            audioRecorder.recordings[idx].name = trimmed.isEmpty ? nil : trimmed
-            audioRecorder.saveRecordings()
-        }
+        store.update(recording.id) { $0.name = trimmed.isEmpty ? nil : trimmed }
     }
 
     private func regenerateSummary() async {
@@ -759,11 +771,9 @@ struct TranscriptionView: View {
 
             // Auto-set name if not already named
             if recording.name == nil {
-                if let idx = audioRecorder.recordings.firstIndex(where: { $0.id == recording.id }) {
-                    await MainActor.run {
-                        audioRecorder.recordings[idx].name = summary.generatedName
-                        audioRecorder.saveRecordings()
-                    }
+                let generatedName = summary.generatedName
+                await MainActor.run {
+                    store.update(recording.id) { $0.name = generatedName }
                 }
             }
         } catch {
@@ -803,16 +813,13 @@ struct TranscriptionView: View {
     }
 
     private func transcribeRecording() async {
-        guard let idx = audioRecorder.recordings.firstIndex(where: { $0.id == recording.id }) else { return }
-        // Update status in the observable array immediately so processingView shows
-        // and both transcribe buttons become inaccessible before the async work starts.
-        audioRecorder.recordings[idx].status = .processing
-        var mutable = audioRecorder.recordings[idx]
+        // Temporary bridge until the queue-based TranscriptionService lands.
+        // Update status immediately so processingView shows before async work starts.
+        store.update(recording.id) { $0.status = .processing }
+        guard var mutable = store.recording(with: recording.id) else { return }
         await transcriptionService.transcribe(recording: &mutable)
-        if let updatedIdx = audioRecorder.recordings.firstIndex(where: { $0.id == mutable.id }) {
-            audioRecorder.recordings[updatedIdx] = mutable
-            audioRecorder.saveRecordings()
-        }
+        let result = mutable
+        store.update(result.id) { $0 = result }
     }
 
     private func copyToClipboard(_ text: String) {

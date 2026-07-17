@@ -2,22 +2,26 @@ import SwiftUI
 
 @main
 struct AudioTranscriberApp: App {
+    @State private var recordingStore = RecordingStore()
     @State private var audioRecorder = AudioRecorder()
     @State private var transcriptionService = TranscriptionService()
     @State private var llmService = LLMService()
-    @State private var searchService = SearchService()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environment(recordingStore)
                 .environment(audioRecorder)
                 .environment(transcriptionService)
                 .environment(llmService)
-                .environment(searchService)
                 .onAppear {
-                    audioRecorder.loadRecordings()
+                    recordingStore.load()
+                    audioRecorder.attach(store: recordingStore)
                     audioRecorder.requestMicPermission()
                     Task { await llmService.checkAvailability() }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+                    recordingStore.saveNow()
                 }
                 .frame(minWidth: 720, minHeight: 480)
         }
@@ -27,7 +31,7 @@ struct AudioTranscriberApp: App {
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("Import Audio Files...") {
-                    audioRecorder.importAudioFiles()
+                    recordingStore.importAudioFiles()
                 }
                 .keyboardShortcut("i", modifiers: .command)
             }
@@ -35,6 +39,9 @@ struct AudioTranscriberApp: App {
 
         Settings {
             SettingsView()
+                .environment(recordingStore)
+                .environment(audioRecorder)
+                .environment(transcriptionService)
                 .environment(llmService)
         }
     }

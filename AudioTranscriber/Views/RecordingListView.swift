@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct RecordingListView: View {
+    @Environment(RecordingStore.self) private var store
     @Environment(AudioRecorder.self) private var audioRecorder
     @Environment(TranscriptionService.self) private var transcriptionService
     @Binding var selectedRecordingID: UUID?
@@ -10,9 +11,9 @@ struct RecordingListView: View {
     @State private var renameText = ""
 
     private var filteredRecordings: [Recording] {
-        guard !searchQuery.isEmpty else { return audioRecorder.recordings }
+        guard !searchQuery.isEmpty else { return store.recordings }
         let lowered = searchQuery.lowercased()
-        return audioRecorder.recordings.filter { recording in
+        return store.recordings.filter { recording in
             if recording.displayName.lowercased().contains(lowered) { return true }
             if let url = recording.transcriptionURL,
                let content = try? String(contentsOf: url, encoding: .utf8),
@@ -58,9 +59,10 @@ struct RecordingListView: View {
                                 Button {
                                     Task { await transcribe(recording) }
                                 } label: {
-                                    Label("Transcribe", systemImage: "waveform.badge.mic")
+                                    Label(recording.status.isResumable ? "Resume Transcription" : "Transcribe",
+                                          systemImage: "waveform.badge.mic")
                                 }
-                                .disabled(recording.status == .processing)
+                                .disabled(!recording.status.canStartTranscription)
 
                                 Button {
                                     renamingRecordingID = recording.id
@@ -70,7 +72,7 @@ struct RecordingListView: View {
                                 }
 
                                 Button {
-                                    audioRecorder.showInFinder(recording)
+                                    store.showInFinder(recording)
                                 } label: {
                                     Label("Show in Finder", systemImage: "folder")
                                 }
@@ -81,7 +83,10 @@ struct RecordingListView: View {
                                     if selectedRecordingID == recording.id {
                                         selectedRecordingID = nil
                                     }
-                                    audioRecorder.deleteRecording(recording)
+                                    if audioRecorder.playingRecordingID == recording.id {
+                                        audioRecorder.stopPlayback()
+                                    }
+                                    store.delete(recording)
                                 } label: {
                                     Label("Delete", systemImage: "trash")
                                 }
@@ -124,10 +129,7 @@ struct RecordingListView: View {
         }
         .sheet(item: $renamingRecordingID) { recordingID in
             RenameSheet(recordingID: recordingID, initialName: renameText) { newName in
-                if let idx = audioRecorder.recordings.firstIndex(where: { $0.id == recordingID }) {
-                    audioRecorder.recordings[idx].name = newName.isEmpty ? nil : newName
-                    audioRecorder.saveRecordings()
-                }
+                store.update(recordingID) { $0.name = newName.isEmpty ? nil : newName }
             }
         }
         .onChange(of: selectedRecordingID) { _, newValue in
@@ -136,11 +138,11 @@ struct RecordingListView: View {
     }
 
     private func transcribe(_ recording: Recording) async {
+        // Temporary bridge until the queue-based TranscriptionService lands.
         var mutable = recording
         await transcriptionService.transcribe(recording: &mutable)
-        if let idx = audioRecorder.recordings.firstIndex(where: { $0.id == mutable.id }) {
-            audioRecorder.recordings[idx] = mutable
-        }
+        let result = mutable
+        store.update(result.id) { $0 = result }
     }
 }
 
@@ -231,6 +233,16 @@ struct RecordingRow: View {
                 .font(.caption2)
                 .foregroundStyle(AppTheme.recording)
                 .labelStyle(.iconOnly)
+        case .paused:
+            Label("Paused", systemImage: "pause.circle.fill")
+                .font(.caption2)
+                .foregroundStyle(AppTheme.warning)
+                .labelStyle(.iconOnly)
+        case .partial:
+            Label("Partial", systemImage: "arrow.trianglehead.clockwise.rotate.90")
+                .font(.caption2)
+                .foregroundStyle(AppTheme.warning)
+                .labelStyle(.iconOnly)
         }
     }
 }
@@ -270,10 +282,10 @@ struct RecordingControlRow: View {
 // MARK: - Import Row
 
 struct ImportAudioRow: View {
-    @Environment(AudioRecorder.self) private var audioRecorder
+    @Environment(RecordingStore.self) private var store
 
     var body: some View {
-        Button(action: { audioRecorder.importAudioFiles() }) {
+        Button(action: { store.importAudioFiles() }) {
             HStack(spacing: 8) {
                 ZStack {
                     Circle()

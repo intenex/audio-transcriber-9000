@@ -87,7 +87,6 @@ final class AudioRecorderTests: XCTestCase {
         let recorder = AudioRecorder()
         XCTAssertFalse(recorder.isRecording)
         XCTAssertEqual(recorder.recordingDuration, 0)
-        XCTAssertTrue(recorder.recordings.isEmpty)
         XCTAssertNil(recorder.errorMessage)
     }
 }

@@ -2,14 +2,14 @@ import SwiftUI
 
 struct GlobalChatView: View {
     @Environment(LLMService.self) private var llmService
-    @Environment(AudioRecorder.self) private var audioRecorder
+    @Environment(RecordingStore.self) private var store
     @State private var messages: [ChatMessage] = []
     @State private var inputText = ""
     @State private var streamingResponse = ""
     @State private var isStreaming = false
 
     private var chatFileURL: URL {
-        audioRecorder.storageDirectory.appendingPathComponent(".global-chat.json")
+        store.storageDirectory.appendingPathComponent(".global-chat.json")
     }
 
     var body: some View {
@@ -28,7 +28,7 @@ struct GlobalChatView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Chat with All Recordings")
                         .font(.headline)
-                    Text("\(audioRecorder.recordings.count) recordings available")
+                    Text("\(store.recordings.count) recordings available")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -181,7 +181,7 @@ struct GlobalChatView: View {
 
     private func buildManifest() -> String {
         var manifest = ""
-        for recording in audioRecorder.recordings {
+        for recording in store.recordings {
             manifest += "Recording: \(recording.displayName)\n"
             manifest += "  Date: \(recording.date.formatted())\n"
             manifest += "  Duration: \(recording.durationString)\n"
