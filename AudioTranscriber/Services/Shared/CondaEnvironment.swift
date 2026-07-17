@@ -1,5 +1,8 @@
 import Foundation
 
+// Child processes don't exist on iOS — the whole conda resolution layer is Mac-only.
+#if os(macOS)
+
 /// Shared conda + script path resolution for the local mlx-lm chat subprocess.
 /// (Local transcription no longer uses Python; only chat does.)
 enum CondaEnvironment {
@@ -49,3 +52,4 @@ enum CondaEnvironment {
         return nil
     }
 }
+#endif

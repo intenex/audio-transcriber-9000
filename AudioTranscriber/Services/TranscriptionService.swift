@@ -1,7 +1,11 @@
-import AppKit
 import Foundation
 import Observation
 import UserNotifications
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 /// Queue-based transcription orchestrator. Jobs run serially through a
 /// pluggable TranscriptionEngine (local FluidAudio by default, cloud engines
@@ -322,7 +326,13 @@ final class TranscriptionService {
     }
 
     private func notifyCompletion(recording: Recording) {
-        guard !isRunningTests, !NSApp.isActive else { return }
+        // Banner only when the app isn't frontmost/active.
+        #if os(macOS)
+        let appIsActive = NSApp.isActive
+        #else
+        let appIsActive = UIApplication.shared.applicationState == .active
+        #endif
+        guard !isRunningTests, !appIsActive else { return }
         let content = UNMutableNotificationContent()
         content.title = "Transcription complete"
         content.body = recording.displayName

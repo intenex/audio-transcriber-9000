@@ -1,6 +1,9 @@
 import XCTest
 @testable import AudioTranscriber
 
+// Mac-only: multi-GB library files via homeDirectoryForCurrentUser.
+#if os(macOS)
+
 /// Stress smoke test: the real 2h07m recording through the local engine.
 /// Read-only on the source file; checkpoint goes to a temp path.
 final class LongFileSmokeTests: XCTestCase {
@@ -92,3 +95,4 @@ final class LongFileSmokeTests: XCTestCase {
         XCTAssertGreaterThan(words, 1000, "suspiciously few words for 2 hours")
     }
 }
+#endif

@@ -214,11 +214,13 @@ struct ChatSessionView: View {
                 .buttonStyle(.bordered)
                 .disabled(chatService.isCheckingLocal)
             }
+            #if os(macOS)
             SettingsLink {
                 Text("Open Settings")
             }
             .buttonStyle(.borderedProminent)
             .tint(AppTheme.accent)
+            #endif
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -380,7 +382,7 @@ struct ChatBubble: View {
                     .background(
                         message.role == .user
                             ? AppTheme.accent.opacity(0.15)
-                            : Color(nsColor: .controlBackgroundColor)
+                            : AppTheme.cardBackground
                     )
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 

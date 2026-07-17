@@ -1,3 +1,5 @@
+// Mac-only: AppKit NSWindow/field-editor driving.
+#if os(macOS)
 import AppKit
 import SwiftUI
 import XCTest
@@ -80,3 +82,4 @@ final class KeychainFieldLiveTests: XCTestCase {
                        "empty field state must not delete the stored key")
     }
 }
+#endif

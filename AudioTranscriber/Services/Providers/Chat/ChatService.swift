@@ -1,12 +1,39 @@
 import Foundation
 import Observation
 
+#if os(iOS)
+/// Stand-in for the Mac-only local MLX provider: the `.localMLX` enum case
+/// must keep existing on iOS (it's Codable in UserDefaults `chatProviderID`),
+/// but selecting it just reports unavailability.
+final class UnavailableChatProvider: ChatProvider {
+    let id = ChatProviderID.localMLX
+    let displayName = "Local (Mac only)"
+    let modelIdentity = "unavailable"
+    let contextCharacterBudget = 6_000
+    var isConfigured: Bool { false }
+
+    func streamChat(messages: [[String: String]], system: String?)
+        -> AsyncThrowingStream<ChatStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.finish(throwing: ChatProviderError.notAvailable(
+                "The local MLX model runs on the Mac app only. Choose MiniMax, OpenAI, or a custom endpoint in Settings."))
+        }
+    }
+
+    func checkAvailability() async -> Bool { false }
+}
+#endif
+
 /// Registry + selection for chat providers. Replaces the old LLMService in the
 /// environment. Default provider: the user's explicit choice; otherwise
 /// MiniMax if keyed, then OpenAI if keyed, then local MLX.
 @Observable @MainActor
 final class ChatService {
+    #if os(macOS)
     let localMLX: LocalMLXChatProvider
+    #else
+    let localMLX: UnavailableChatProvider
+    #endif
     let miniMax: OpenAICompatibleChatProvider
     let openAI: OpenAICompatibleChatProvider
     let custom: OpenAICompatibleChatProvider
@@ -21,7 +48,11 @@ final class ChatService {
         self.secrets = secrets
         self.defaults = defaults
 
+        #if os(macOS)
         localMLX = LocalMLXChatProvider()
+        #else
+        localMLX = UnavailableChatProvider()
+        #endif
         miniMax = OpenAICompatibleChatProvider(
             id: .miniMax, displayName: "MiniMax",
             baseURL: { URL(string: "https://api.minimax.io/v1") },

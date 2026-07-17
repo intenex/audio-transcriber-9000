@@ -1,6 +1,9 @@
 import XCTest
 @testable import AudioTranscriber
 
+// Mac-only: real multi-minute library file.
+#if os(macOS)
+
 /// Full-stack resume test: RecordingStore + TranscriptionService + real
 /// LocalFluidAudioEngine on a real multi-chunk recording. Pauses mid-ASR,
 /// simulates an app relaunch with a fresh service, and verifies the job
@@ -126,3 +129,4 @@ final class ResumeIntegrationTests: XCTestCase {
         return try? decoder.decode(TranscriptionCheckpoint.self, from: data)
     }
 }
+#endif

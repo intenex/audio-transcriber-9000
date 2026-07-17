@@ -2,6 +2,9 @@ import CoreMedia
 import XCTest
 @testable import AudioTranscriber
 
+// Mac-only: real library files + Keychain live checks.
+#if os(macOS)
+
 /// Gated verifications against real user data / live APIs — the exact
 /// reproductions of reported bugs. Enabled by the integration marker file.
 final class LiveFixVerificationTests: XCTestCase {
@@ -83,3 +86,4 @@ final class LiveFixVerificationTests: XCTestCase {
         XCTAssertEqual(summary.modelUsed, "MiniMax-M3")
     }
 }
+#endif

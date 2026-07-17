@@ -30,6 +30,10 @@ enum AppTheme {
     )
 
     // Subtle backgrounds
+    #if os(macOS)
     static let cardBackground = Color(nsColor: .controlBackgroundColor)
+    #else
+    static let cardBackground = Color(uiColor: .secondarySystemBackground)
+    #endif
     static let sidebarSelection = Color.accentColor.opacity(0.15)
 }

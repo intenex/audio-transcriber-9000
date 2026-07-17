@@ -1,5 +1,8 @@
 import Foundation
 
+// Child processes don't exist on iOS — the whole mlx-lm child process layer is Mac-only.
+#if os(macOS)
+
 /// Local mlx-lm chat via the conda `transcriber` env. Runs `generate.py --server`
 /// as a persistent child process (model loads once, stays warm); falls back to
 /// one-shot invocations if the server handshake fails.
@@ -237,3 +240,4 @@ actor MLXServerProcess {
         }
     }
 }
+#endif
