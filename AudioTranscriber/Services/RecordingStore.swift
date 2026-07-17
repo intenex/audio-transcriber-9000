@@ -187,8 +187,14 @@ final class RecordingStore {
 
     func renameCategory(_ old: String, to new: String) {
         let trimmed = new.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, let idx = categories.firstIndex(of: old) else { return }
-        categories[idx] = trimmed
+        guard !trimmed.isEmpty, trimmed != old, let idx = categories.firstIndex(of: old) else { return }
+        if categories.contains(trimmed) {
+            // Renaming onto an existing category = merge: drop the old name so
+            // no duplicate entries end up in the sidebar/manifest.
+            categories.remove(at: idx)
+        } else {
+            categories[idx] = trimmed
+        }
         for rIdx in recordings.indices where recordings[rIdx].category == old {
             recordings[rIdx].category = trimmed
         }

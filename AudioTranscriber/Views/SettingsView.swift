@@ -355,6 +355,7 @@ final class ClipPlayer {
 
 struct StorageSettingsTab: View {
     @Environment(RecordingStore.self) private var store
+    @Environment(SpeakerLibraryStore.self) private var speakerLibrary
     @AppStorage("storageDirectory") private var storageDirectory = ""
 
     var body: some View {
@@ -393,6 +394,9 @@ struct StorageSettingsTab: View {
             }
             .onChange(of: storageDirectory) { _, _ in
                 store.reloadFromStorageDirectory()
+                // Keep the voice library pointed at the active storage folder,
+                // or enrollments would silently write to the old location.
+                speakerLibrary.attach(storageDirectory: store.storageDirectory)
             }
 
             Section {

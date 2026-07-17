@@ -79,16 +79,19 @@ final class LocalMLXChatProvider: ChatProvider {
 // MARK: - Persistent server process
 
 /// Owns the long-lived `generate.py --server` child. Requests are serialized
-/// (actor); the child is restarted on crash or model change.
+/// (actor); the child is restarted on crash or model change. Stdout is drained
+/// into an actor-held buffer by the readability handler; consumers poll it, so
+/// timeouts fire even when the child produces no output at all (e.g. a stalled
+/// first-time model download).
 actor MLXServerProcess {
     static let endMarker = "\u{1E}<<END:"
     static let readyMarker = "\u{1E}<<READY>>"
+    static let pollInterval: Duration = .milliseconds(40)
 
     private var process: Process? = nil
     private var stdinHandle: FileHandle? = nil
     private var stdoutBuffer = ""
-    private var outputContinuation: AsyncStream<String>.Continuation? = nil
-    private var outputStream: AsyncStream<String>? = nil
+    private var childExited = false
     private var loadedModel: String? = nil
 
     func interrupt() {
@@ -96,14 +99,20 @@ actor MLXServerProcess {
         teardown()
     }
 
+    private func append(_ text: String) {
+        stdoutBuffer += text
+    }
+
+    private func markExited() {
+        childExited = true
+    }
+
     private func teardown() {
         if let process, process.isRunning { process.terminate() }
         process = nil
         stdinHandle = nil
-        outputContinuation?.finish()
-        outputContinuation = nil
-        outputStream = nil
         stdoutBuffer = ""
+        childExited = false
         loadedModel = nil
     }
 
@@ -130,48 +139,45 @@ actor MLXServerProcess {
         child.standardOutput = stdoutPipe
         child.standardError = stderrPipe
 
-        let (stream, continuation) = AsyncStream.makeStream(of: String.self)
-        outputStream = stream
-        outputContinuation = continuation
-
-        stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
+        stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            continuation.yield(text)
+            Task { await self?.append(text) }
         }
         // Drain stderr continuously so the child can never block on a full pipe.
         stderrPipe.fileHandleForReading.readabilityHandler = { handle in
             _ = handle.availableData
         }
-        child.terminationHandler = { _ in
+        child.terminationHandler = { [weak self] _ in
             stdoutPipe.fileHandleForReading.readabilityHandler = nil
             stderrPipe.fileHandleForReading.readabilityHandler = nil
-            continuation.finish()
+            Task { await self?.markExited() }
         }
 
         try child.run()
         process = child
         stdinHandle = stdinPipe.fileHandleForWriting
 
-        // Wait for READY (model load can take ~10-60s on first run).
-        let ready = try await waitForMarker(Self.readyMarker, timeout: 300)
+        // Wait for READY (model load can take minutes on a first-time download).
+        let ready = try await waitForReady(timeout: 300)
         guard ready else {
             teardown()
-            throw ChatProviderError.notAvailable("Local AI model failed to load.")
+            throw ChatProviderError.notAvailable("Local AI model failed to load (timed out or crashed).")
         }
         loadedModel = model
     }
 
-    private func waitForMarker(_ marker: String, timeout: TimeInterval) async throws -> Bool {
-        guard let outputStream else { return false }
+    /// Polls the buffer so the deadline fires even with zero child output.
+    private func waitForReady(timeout: TimeInterval) async throws -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
-        for await chunk in outputStream {
-            stdoutBuffer += chunk
-            if stdoutBuffer.contains(marker) {
+        while Date() < deadline {
+            try Task.checkCancellation()
+            if stdoutBuffer.contains(Self.readyMarker) {
                 stdoutBuffer = ""
                 return true
             }
-            if Date() > deadline { return false }
+            if childExited { return false }
+            try await Task.sleep(for: Self.pollInterval)
         }
         return false
     }
@@ -179,7 +185,7 @@ actor MLXServerProcess {
     func stream(messages: [[String: String]], system: String?, model: String,
                 onToken: @escaping (String) -> Void) async throws {
         try await ensureServer(model: model)
-        guard let stdinHandle, let outputStream else {
+        guard let stdinHandle else {
             throw ChatProviderError.notAvailable("Local AI server not running.")
         }
 
@@ -190,9 +196,9 @@ actor MLXServerProcess {
         stdinHandle.write(Data("\n".utf8))
 
         stdoutBuffer = ""
-        for await chunk in outputStream {
+        while true {
             try Task.checkCancellation()
-            stdoutBuffer += chunk
+
             if let markerRange = stdoutBuffer.range(of: Self.endMarker) {
                 // Emit everything before the marker, then parse status.
                 let text = String(stdoutBuffer[..<markerRange.lowerBound])
@@ -207,7 +213,8 @@ actor MLXServerProcess {
                 }
                 return
             }
-            // Safe to flush all but a marker-length tail.
+
+            // Flush all but a marker-length tail as streaming tokens.
             let keep = Self.endMarker.count + 32
             if stdoutBuffer.count > keep {
                 let flushEnd = stdoutBuffer.index(stdoutBuffer.endIndex, offsetBy: -keep)
@@ -215,9 +222,12 @@ actor MLXServerProcess {
                 stdoutBuffer = String(stdoutBuffer[flushEnd...])
                 if !text.isEmpty { onToken(text) }
             }
+
+            if childExited {
+                teardown()
+                throw ChatProviderError.providerError("Local AI process exited unexpectedly.")
+            }
+            try await Task.sleep(for: Self.pollInterval)
         }
-        // Stream ended without the end marker — child died mid-response.
-        teardown()
-        throw ChatProviderError.providerError("Local AI process exited unexpectedly.")
     }
 }

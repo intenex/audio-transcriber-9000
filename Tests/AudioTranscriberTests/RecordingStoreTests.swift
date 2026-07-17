@@ -156,6 +156,30 @@ final class RecordingStoreTests: XCTestCase {
         XCTAssertEqual(store.recordings.first?.category, "New")
     }
 
+    func testRenameCategoryOntoExistingMerges() {
+        let store = makeStore()
+        store.load()
+        let wav1 = writeWav("m1.wav")
+        let wav2 = writeWav("m2.wav")
+        store.addCategory("Work")
+        store.addCategory("Meetings")
+        store.insert(Recording(fileURL: wav1, date: .now, duration: 1, category: "Work"))
+        store.insert(Recording(fileURL: wav2, date: .now, duration: 1, category: "Meetings"))
+
+        store.renameCategory("Meetings", to: "Work")
+
+        XCTAssertEqual(store.categories, ["Work"], "no duplicate category entries")
+        XCTAssertTrue(store.recordings.allSatisfy { $0.category == "Work" })
+    }
+
+    func testRenameCategoryToSameNameIsNoOp() {
+        let store = makeStore()
+        store.load()
+        store.addCategory("Work")
+        store.renameCategory("Work", to: "Work")
+        XCTAssertEqual(store.categories, ["Work"])
+    }
+
     func testDeleteCategoryFallsBackToUncategorized() {
         let store = makeStore()
         store.load()
