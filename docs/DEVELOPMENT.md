@@ -20,6 +20,7 @@ How to work on this codebase without regressing it. Read [ARCHITECTURE.md](ARCHI
 - **recordings.json is a rebuildable cache; `.meta.json` is the durable metadata source.** Code must survive a deleted/corrupt manifest (orphan adoption + meta sidecars rebuild it, stable UUIDs included). Metadata edits (name/category/engineUsed) must go through `store.update`/the category APIs — direct array mutation would leave the sidecar stale. Don't add state that can't be reconstructed or tolerated as lost.
 - **All library writes are atomic via `AtomicFile`** — never `data.write(to:)` a sidecar directly; partial files must be unobservable (sync agents upload mid-write otherwise).
 - **Checkpoints live OUTSIDE the library** (`CheckpointLocation`: Application Support, keyed by recording UUID) — they're rewritten every chunk and are device-local. Never derive a checkpoint path from the audio stem; `Recording.checkpointURL` is the only source. Stable UUIDs (via `.meta.json`) are what make ID-keying safe.
+- **Never stream a growing file into the library.** The active recording, in-flight compressions, and imports write into the device-local spool (`SpoolLocation`, Application Support/InProgress) and are **renamed** into the library only after the container is finalized and verified. `store.activeRecordingURL` marks the live file so the launch spool-sweep (which salvages crash leftovers >4 KB) never touches it. Real-mic flow verified by the gated `RecorderSpoolIntegrationTests`.
 
 ## Concurrency rules (violations here were real crashes)
 

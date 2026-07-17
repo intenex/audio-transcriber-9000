@@ -66,8 +66,11 @@ final class AudioRecorder: NSObject {
 
         let format = RecordingFormat.selected
         let filename = "recording_\(dateString()).\(format.fileExtension)"
-        let url = store.storageDirectory.appendingPathComponent(filename)
+        // Record into the device-local spool; the file moves into the library
+        // only after the container is finalized at stop (sync safety).
+        let url = SpoolLocation.url(fileName: filename)
         currentRecordingURL = url
+        store.activeRecordingURL = url
         NSLog("[AudioRecorder] Starting recording to: \(url.path)")
 
         // Use a detached task to avoid blocking the main thread.
@@ -149,6 +152,8 @@ final class AudioRecorder: NSObject {
         } catch {
             NSLog("[AudioRecorder] Failed: \(error)")
             self.errorMessage = "Failed to start recording: \(error.localizedDescription)"
+            self.store?.activeRecordingURL = nil
+            self.currentRecordingURL = nil
         }
     }
 
@@ -180,7 +185,12 @@ final class AudioRecorder: NSObject {
         let wallClock = recordingStartDate.map { Date().timeIntervalSince($0) } ?? recordingDuration
         let duration = fileDuration > 0 ? fileDuration : wallClock
         let date = recordingStartDate ?? Date()
-        let recording = Recording(fileURL: url, date: date, duration: duration)
+
+        // The container is finalized (audioFile released above) — move the
+        // completed file from the spool into the library.
+        store?.activeRecordingURL = nil
+        let finalURL = store?.finalizeRecordingFile(at: url) ?? url
+        let recording = Recording(fileURL: finalURL, date: date, duration: duration)
 
         store?.insert(recording)
         return recording

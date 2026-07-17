@@ -17,6 +17,10 @@ final class RecordingStore {
     /// auto-transcribe setting.
     var onRecordingAdded: ((UUID) -> Void)? = nil
 
+    /// The file the recorder is actively streaming into (in the spool).
+    /// The launch/reload spool sweep must never touch it.
+    var activeRecordingURL: URL? = nil
+
     private(set) var storageDirectory: URL
 
     private let defaults: UserDefaults
@@ -54,6 +58,10 @@ final class RecordingStore {
     func load() {
         storageDirectory = fixedStorageDirectory ?? Self.resolveStorageDirectory(defaults: defaults)
         try? FileManager.default.createDirectory(at: storageDirectory, withIntermediateDirectories: true)
+
+        // Salvage finalized-but-unmoved recordings from the spool (crash
+        // between finalize and move); orphan adoption below picks them up.
+        sweepSpool()
 
         var loaded: [Recording] = []
         var loadedCategories: [String] = []
@@ -192,6 +200,45 @@ final class RecordingStore {
             orphans.append(recording)
         }
         return orphans
+    }
+
+    // MARK: - Spool
+
+    /// Move a finalized spool file into the library (rename; copy+delete
+    /// across volumes). On total failure the data stays in the spool and the
+    /// spool URL is returned — never lose a finished recording.
+    func finalizeRecordingFile(at spoolURL: URL) -> URL {
+        let dest = uniqueURL(for: storageDirectory.appendingPathComponent(spoolURL.lastPathComponent))
+        do {
+            try FileManager.default.moveItem(at: spoolURL, to: dest)
+            return dest
+        } catch {
+            do {
+                try FileManager.default.copyItem(at: spoolURL, to: dest)
+                try? FileManager.default.removeItem(at: spoolURL)
+                return dest
+            } catch {
+                NSLog("[RecordingStore] Could not move recording into library: \(error)")
+                errorMessage = "The recording was saved to a temporary location but could not be moved into the library: \(error.localizedDescription)"
+                return spoolURL
+            }
+        }
+    }
+
+    private func sweepSpool() {
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: SpoolLocation.directory, includingPropertiesForKeys: [.fileSizeKey]
+        ) else { return }
+        for url in contents {
+            guard url != activeRecordingURL else { continue }
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            if size > 4096 {
+                _ = finalizeRecordingFile(at: url)
+            } else {
+                // Header-only stubs and abandoned temp work files.
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
     }
 
     // MARK: - Metadata sidecars
@@ -379,16 +426,22 @@ final class RecordingStore {
 
     private func importOne(_ sourceURL: URL, compress: Bool) async {
         do {
+            // Write into the spool first, then rename into the library — a
+            // synced library must never see a growing file.
             let recording: Recording
             if compress {
                 let stem = sourceURL.deletingPathExtension().lastPathComponent
+                let workURL = SpoolLocation.url(fileName: "import-\(UUID().uuidString).m4a")
+                _ = try await AudioCompressor.compress(source: sourceURL, to: workURL, spec: .storage)
                 let destURL = uniqueURL(for: storageDirectory.appendingPathComponent("\(stem).m4a"))
-                _ = try await AudioCompressor.compress(source: sourceURL, to: destURL, spec: .storage)
+                try FileManager.default.moveItem(at: workURL, to: destURL)
                 recording = Recording(fileURL: destURL, date: .now,
                                       duration: Self.audioDuration(for: destURL))
             } else {
+                let workURL = SpoolLocation.url(fileName: "import-\(UUID().uuidString).\(sourceURL.pathExtension)")
+                try FileManager.default.copyItem(at: sourceURL, to: workURL)
                 let destURL = uniqueURL(for: storageDirectory.appendingPathComponent(sourceURL.lastPathComponent))
-                try FileManager.default.copyItem(at: sourceURL, to: destURL)
+                try FileManager.default.moveItem(at: workURL, to: destURL)
                 recording = Recording(fileURL: destURL, date: .now,
                                       duration: Self.audioDuration(for: destURL))
             }
@@ -450,6 +503,10 @@ final class RecordingStore {
             errorMessage = "\(destURL.lastPathComponent) already exists."
             return
         }
+        // Encode into the spool; only a verified, complete file is renamed
+        // into the library (which may be synced).
+        let workURL = SpoolLocation.url(fileName: "compress-\(recording.id.uuidString).m4a")
+        try? FileManager.default.removeItem(at: workURL)
 
         let originalBytes = Self.fileSize(of: recording.fileURL)
         let recordingID = recording.id
@@ -462,7 +519,7 @@ final class RecordingStore {
 
         do {
             _ = try await AudioCompressor.compress(
-                source: recording.fileURL, to: destURL, spec: spec,
+                source: recording.fileURL, to: workURL, spec: spec,
                 progress: { fraction in
                     Task { @MainActor [weak self] in
                         if self?.compressingProgress[recordingID] != nil {
@@ -470,13 +527,14 @@ final class RecordingStore {
                         }
                     }
                 })
-            let newDuration = Self.audioDuration(for: destURL)
+            let newDuration = Self.audioDuration(for: workURL)
             let tolerance = max(1.0, referenceDuration * 0.01)
             guard newDuration > 0, abs(newDuration - referenceDuration) <= tolerance else {
-                try? FileManager.default.removeItem(at: destURL)
+                try? FileManager.default.removeItem(at: workURL)
                 errorMessage = "Compression aborted for \(recording.displayName): the converted file is \(Int(newDuration))s but the source contains \(Int(referenceDuration))s of audio. Original kept."
                 return
             }
+            try FileManager.default.moveItem(at: workURL, to: destURL)
             let originalURL = recording.fileURL
             let newBytes = Self.fileSize(of: destURL)
             update(recording.id) {
@@ -491,7 +549,7 @@ final class RecordingStore {
             let saved = originalBytes > 0 ? Int((1 - Double(newBytes) / Double(originalBytes)) * 100) : 0
             infoMessage = "Compressed “\(recording.displayName)”: \(before) → \(after) (\(saved)% smaller)."
         } catch {
-            try? FileManager.default.removeItem(at: destURL)
+            try? FileManager.default.removeItem(at: workURL)
             errorMessage = "Compression failed for \(recording.displayName): \(error.localizedDescription)"
         }
     }

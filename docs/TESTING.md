@@ -4,7 +4,7 @@ What exists, how to run it, and what "verified" means in this project. See [DEVE
 
 ## Test suites (Tests/AudioTranscriberTests/, `@testable import AudioTranscriber`)
 
-**Unit — always run, no network, no models (174 tests as of 2026-07-17):**
+**Unit — always run, no network, no models (177 tests as of 2026-07-17):**
 
 | Suite | Covers |
 |---|---|
@@ -13,6 +13,7 @@ What exists, how to run it, and what "verified" means in this project. See [DEVE
 | `RecordingStoreTests` | manifest round-trip, legacy UserDefaults migration, orphan adoption, crash-artifact skip, status repair, category rename-merge/delete cascades, sidecar deletion, tolerant status decode |
 | `RecordingMetaTests` | `.meta.json` sidecar: written on insert/change (no-op updates leave the file byte-identical), **library reconstructs from the directory alone with stable UUIDs/names/categories** after deleting recordings.json, external (synced-in) meta edits win on reload, legacy-library backfill, delete cleanup |
 | `CheckpointRelocationTests` | checkpoint path is ID-keyed under Application Support (never inside the library), legacy `<stem>.partial.json` migrates at load and launch repair sees it, delete cleans the relocated file. Tests that write real checkpoints must clean up (the location is global) |
+| `SpoolTests` | finalize moves a spool file into the library; launch sweep salvages crash leftovers (>4 KB) and deletes stubs; the sweep never touches `store.activeRecordingURL` (the live recording) |
 | `TranscriptionQueueTests` | queue semantics with `MockTranscriptionEngine`: serial order, dedupe, pause keeps checkpoint → `.paused`, cancel deletes → `.pending`, failure → `.failed`, sidecar bytes written |
 | `ChatProviderTests` / `ChatServiceSelectionTests` | SSE token streaming, system-prompt prepend, MiniMax `reasoning_content` + `base_resp` error on HTTP 200, 401/missing-key paths, undecodable-chunk tolerance; provider auto-selection (MiniMax→OpenAI→local, explicit wins) |
 | `CloudEngineTests` | AudioSplitPlanner (25 MB math vs the real 4 h 56 m duration), PartMerger (offsets, canonical minting, enrolled-name propagation, S-token continuity), diarized_json + AssemblyAI response parsing, cost estimator, **mocked AssemblyAI end-to-end flow with real audio compression** |
@@ -45,6 +46,7 @@ rm /tmp/audiotranscriber-integration-tests
 | `LongFileSmokeTests` (2 h) | The real 2 h 07 m / 1.4 GB recording end-to-end (read-only on the source; checkpoint in temp): 43 chunks, 247 segments, 9 695 words, 2 speakers, 100 % coverage | 142 s (53×) |
 | `LongFileSmokeTests` (5 h) | The real 4 h 56 m / **3.4 GB** recording — the file whose >2 GB payload crashed the old single-shot loader with error -40: 99 chunks, 544 segments, 100 % coverage via `WindowedAudioLoader` | 362 s (49×) |
 | `DiarizerThresholdSweepTests` | Tuning harness: speaker count per clusteringThreshold on the fixture (0.85 ⇒ 2 ✓) | ~10 s |
+| `RecorderSpoolIntegrationTests` | Real-mic record flow: live file streams into the spool (never the library), stop finalizes the container and renames it into the library with header-verified duration, spool left clean | ~5 s |
 
 Long real samples referenced by the integration tests live in `~/Documents/AudioTranscriber/` (tests `XCTSkip` when absent).
 
