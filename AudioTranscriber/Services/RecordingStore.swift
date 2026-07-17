@@ -81,6 +81,19 @@ final class RecordingStore {
             loaded[idx].fileSizeBytes = Self.fileSize(of: loaded[idx].fileURL)
         }
 
+        // Heal stale durations: data migrated from the old app carried
+        // timer-accumulated durations that can be wildly wrong (a 2h07m file
+        // stored as 4h05m). The audio header is the truth.
+        for idx in loaded.indices {
+            let actual = Self.audioDuration(for: loaded[idx].fileURL)
+            guard actual > 0 else { continue }
+            let stored = loaded[idx].duration
+            if abs(stored - actual) > max(2.0, actual * 0.02) {
+                NSLog("[RecordingStore] Healing stale duration for \(loaded[idx].fileURL.lastPathComponent): \(Int(stored))s -> \(Int(actual))s")
+                loaded[idx].duration = actual
+            }
+        }
+
         recordings = loaded.sorted { $0.date > $1.date }
         categories = loadedCategories
         saveNow()
@@ -332,6 +345,12 @@ final class RecordingStore {
         let originalBytes = Self.fileSize(of: recording.fileURL)
         let recordingID = recording.id
 
+        // Verify against the SOURCE FILE's actual duration — the manifest value
+        // can be stale legacy-timer garbage (e.g. 14720s stored for a 7630s
+        // file), and comparing against it aborted perfectly good conversions.
+        let sourceDuration = Self.audioDuration(for: recording.fileURL)
+        let referenceDuration = sourceDuration > 0 ? sourceDuration : recording.duration
+
         do {
             _ = try await AudioCompressor.compress(
                 source: recording.fileURL, to: destURL, spec: spec,
@@ -343,10 +362,10 @@ final class RecordingStore {
                     }
                 })
             let newDuration = Self.audioDuration(for: destURL)
-            let tolerance = max(1.0, recording.duration * 0.01)
-            guard newDuration > 0, abs(newDuration - recording.duration) <= tolerance else {
+            let tolerance = max(1.0, referenceDuration * 0.01)
+            guard newDuration > 0, abs(newDuration - referenceDuration) <= tolerance else {
                 try? FileManager.default.removeItem(at: destURL)
-                errorMessage = "Compression aborted for \(recording.displayName): duration mismatch (\(Int(newDuration))s vs \(Int(recording.duration))s). Original kept."
+                errorMessage = "Compression aborted for \(recording.displayName): the converted file is \(Int(newDuration))s but the source contains \(Int(referenceDuration))s of audio. Original kept."
                 return
             }
             let originalURL = recording.fileURL

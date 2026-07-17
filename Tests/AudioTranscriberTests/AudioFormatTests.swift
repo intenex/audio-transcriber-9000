@@ -139,6 +139,38 @@ final class CompressInPlaceTests: XCTestCase {
         XCTAssertNil(store.errorMessage)
     }
 
+    /// The exact reported bug: manifest carried a stale legacy duration (~2x
+    /// the file's real length), which made the duration check abort a
+    /// perfectly good conversion. Verification must use the source file's
+    /// actual duration, and succeed despite the bad manifest value.
+    func testCompressSucceedsDespiteStaleManifestDuration() async throws {
+        let wav = try makeRealWav("stale.wav", seconds: 3)
+        // Manifest lies: claims 6s for a 3s file (like 14720s vs 7629s).
+        let recording = Recording(fileURL: wav, date: .now, duration: 6.0)
+        store.insert(recording)
+
+        await store.compressAudio(recording)
+
+        XCTAssertNil(store.errorMessage, "compression must not abort on stale manifest duration")
+        let updated = store.recording(with: recording.id)
+        XCTAssertEqual(updated?.fileURL.pathExtension, "m4a")
+        XCTAssertEqual(updated?.duration ?? 0, 3.0, accuracy: 0.3, "duration healed to reality")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: wav.path))
+    }
+
+    func testLoadHealsStaleDurations() throws {
+        let wav = try makeRealWav("drift.wav", seconds: 3)
+        var recording = Recording(fileURL: wav, date: .now, duration: 3)
+        recording.duration = 5.8   // stale legacy value
+        store.insert(recording)
+        store.saveNow()
+
+        let store2 = RecordingStore(storageDirectory: tempDir,
+                                    defaults: UserDefaults(suiteName: "CompressTests-heal-\(UUID().uuidString)")!)
+        store2.load()
+        XCTAssertEqual(store2.recording(with: recording.id)?.duration ?? 0, 3.0, accuracy: 0.3)
+    }
+
     func testCompressSkipsAlreadyCompressed() async throws {
         let wav = try makeRealWav("keep.wav", seconds: 1)
         // Manually rename to .m4a extension category by making a compressed copy first
