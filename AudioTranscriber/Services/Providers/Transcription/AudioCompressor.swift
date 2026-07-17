@@ -33,7 +33,25 @@ enum AudioCompressorError: LocalizedError {
 /// M4A preset offers no bitrate control). Supports optional time-range slicing,
 /// which also powers reference-clip extraction.
 enum AudioCompressor {
-    static func compress(source: URL, timeRange: CMTimeRange? = nil, to destination: URL) async throws -> URL {
+    /// Output profile. `.cloudUpload` (16 kHz mono 32 kbps) minimizes upload
+    /// size for speech APIs; `.storage` (48 kHz mono 96 kbps) is the archival
+    /// profile — transparent for speech, ~45 MB/hour.
+    struct Spec: Sendable {
+        let sampleRate: Double
+        let channels: Int
+        let bitrate: Int
+
+        static let cloudUpload = Spec(sampleRate: CloudAudioSpec.sampleRate,
+                                      channels: 1, bitrate: CloudAudioSpec.bitrate)
+        static let storage = Spec(sampleRate: 48_000, channels: 1, bitrate: 96_000)
+
+        func estimatedBytes(forSeconds seconds: Double) -> Int {
+            Int(seconds * Double(bitrate) / 8)
+        }
+    }
+
+    static func compress(source: URL, timeRange: CMTimeRange? = nil,
+                         to destination: URL, spec: Spec = .cloudUpload) async throws -> URL {
         try? FileManager.default.removeItem(at: destination)
 
         let asset = AVURLAsset(url: source)
@@ -56,9 +74,9 @@ enum AudioCompressor {
         let writer = try AVAssetWriter(outputURL: destination, fileType: .m4a)
         let writerInput = AVAssetWriterInput(mediaType: .audio, outputSettings: [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
-            AVSampleRateKey: CloudAudioSpec.sampleRate,
-            AVNumberOfChannelsKey: 1,
-            AVEncoderBitRateKey: CloudAudioSpec.bitrate,
+            AVSampleRateKey: spec.sampleRate,
+            AVNumberOfChannelsKey: spec.channels,
+            AVEncoderBitRateKey: spec.bitrate,
         ])
         writerInput.expectsMediaDataInRealTime = false
         guard writer.canAdd(writerInput) else {

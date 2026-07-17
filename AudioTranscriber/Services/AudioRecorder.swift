@@ -64,7 +64,8 @@ final class AudioRecorder: NSObject {
         guard !isRecording else { return }
         guard let store else { return }
 
-        let filename = "recording_\(dateString()).wav"
+        let format = RecordingFormat.selected
+        let filename = "recording_\(dateString()).\(format.fileExtension)"
         let url = store.storageDirectory.appendingPathComponent(filename)
         currentRecordingURL = url
         NSLog("[AudioRecorder] Starting recording to: \(url.path)")
@@ -90,20 +91,15 @@ final class AudioRecorder: NSObject {
                 let inputFormat = inputNode.outputFormat(forBus: 0)
                 NSLog("[AudioRecorder] Input format: \(inputFormat)")
 
-                // Write 16-bit PCM (half the size of Float32) while keeping the tap
-                // in the native input format. The AVAudioFile's processingFormat is
-                // pinned to the tap format via commonFormat:, so ExtAudioFile performs
-                // the Float32→Int16 conversion internally — no AVAudioConverter in the
-                // tap callback (which historically crashed).
+                // Write compressed AAC (or 16-bit WAV) while keeping the tap in the
+                // native input format. The AVAudioFile's processingFormat is pinned
+                // to the tap format via commonFormat:, so encoding happens internally
+                // — no AVAudioConverter in the tap callback (which historically crashed).
+                let format = RecordingFormat.selected
                 let file: AVAudioFile
                 if inputFormat.commonFormat == .pcmFormatFloat32 {
-                    var settings = inputFormat.settings
-                    settings[AVFormatIDKey] = kAudioFormatLinearPCM
-                    settings[AVLinearPCMBitDepthKey] = 16
-                    settings[AVLinearPCMIsFloatKey] = false
-                    settings[AVLinearPCMIsBigEndianKey] = false
-                    settings[AVLinearPCMIsNonInterleaved] = false
-                    file = try AVAudioFile(forWriting: url, settings: settings,
+                    file = try AVAudioFile(forWriting: url,
+                                           settings: format.fileSettings(for: inputFormat),
                                            commonFormat: .pcmFormatFloat32,
                                            interleaved: false)
                 } else {
@@ -269,15 +265,17 @@ final class AudioRecorder: NSObject {
             // Wall-clock, not accumulation — immune to timer drift on long recordings.
             self.recordingDuration = Date().timeIntervalSince(start)
 
-            // Check the file-size cap every ~10s.
+            // WAV's 32-bit header caps files at 4 GB — check every ~10s.
+            // Compressed (m4a) recordings have no such limit.
             tick += 1
-            if tick % 100 == 0, let file = self.audioFile {
+            if tick % 100 == 0, let file = self.audioFile,
+               file.url.pathExtension.lowercased() == "wav" {
                 let bytesPerFrame = Int64(file.fileFormat.streamDescription.pointee.mBytesPerFrame)
                 let approximateBytes = Int64(file.length) * max(1, bytesPerFrame)
                 if approximateBytes > Self.maxRecordingBytes {
                     Task { @MainActor in
                         self.stopRecording()
-                        self.errorMessage = "Recording stopped automatically: the WAV format's 4 GB limit was reached. The recording so far has been saved."
+                        self.errorMessage = "Recording stopped automatically: the WAV format's 4 GB limit was reached. The recording so far has been saved. Tip: switch to compressed recording in Settings → Storage to avoid this limit."
                     }
                 }
             }

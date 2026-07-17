@@ -282,6 +282,15 @@ struct RecordingListView: View {
             Label("Show in Finder", systemImage: "folder")
         }
 
+        if RecordingStore.compressibleExtensions.contains(recording.fileURL.pathExtension.lowercased()) {
+            Button {
+                Task { await store.compressAudio(recording) }
+            } label: {
+                Label("Compress Audio (AAC)", systemImage: "arrow.down.circle")
+            }
+            .disabled(recording.status == .processing || store.compressingIDs.contains(recording.id))
+        }
+
         Divider()
 
         Button(role: .destructive) {

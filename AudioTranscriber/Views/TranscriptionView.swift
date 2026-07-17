@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import CoreMedia
+import UniformTypeIdentifiers
 
 enum DetailTab: String, CaseIterable {
     case transcript = "Transcript"
@@ -315,8 +316,8 @@ struct TranscriptionView: View {
                     }
 
                     Section("Audio") {
-                        Button(action: { exportAudio(format: .wav) }) {
-                            Label("Export as WAV (\(audioSizeEstimate(format: .wav)))", systemImage: "waveform")
+                        Button(action: { exportAudio(format: .original) }) {
+                            Label("Export Original \(originalAudioExtension) (\(audioSizeEstimate(format: .original)))", systemImage: "waveform")
                         }
                         Button(action: { exportAudio(format: .mp3) }) {
                             Label("Export as MP3 (\(audioSizeEstimate(format: .mp3)))", systemImage: "waveform.badge.minus")
@@ -353,8 +354,8 @@ struct TranscriptionView: View {
             // Always show audio export even without transcription
             if recording.status != .done {
                 Menu {
-                    Button(action: { exportAudio(format: .wav) }) {
-                        Label("Export as WAV (\(audioSizeEstimate(format: .wav)))", systemImage: "waveform")
+                    Button(action: { exportAudio(format: .original) }) {
+                        Label("Export Original \(originalAudioExtension) (\(audioSizeEstimate(format: .original)))", systemImage: "waveform")
                     }
                     Button(action: { exportAudio(format: .mp3) }) {
                         Label("Export as MP3 (\(audioSizeEstimate(format: .mp3)))", systemImage: "waveform.badge.minus")
@@ -1163,17 +1164,23 @@ struct TranscriptionView: View {
         }
     }
 
-    private enum AudioExportFormat { case wav, mp3 }
+    private enum AudioExportFormat { case original, mp3 }
+
+    /// The recording's on-disk container ("WAV", "M4A", …).
+    private var originalAudioExtension: String {
+        recording.fileURL.pathExtension.uppercased()
+    }
 
     private func audioSizeEstimate(format: AudioExportFormat) -> String {
-        let fileSize = (try? FileManager.default.attributesOfItem(atPath: recording.fileURL.path)[.size] as? Int64) ?? 0
+        let attrs = try? FileManager.default.attributesOfItem(atPath: recording.fileURL.path)
+        let fileSize = (attrs?[.size] as? NSNumber)?.int64Value ?? 0
         switch format {
-        case .wav:
+        case .original:
             return formatFileSize(fileSize)
         case .mp3:
-            // WAV → MP3 at 128kbps is roughly 1/10th of 16-bit 44.1kHz WAV, or duration-based estimate
-            let estimatedMP3 = max(Int64(recording.duration * 16000), fileSize / 10)
-            return "~\(formatFileSize(estimatedMP3))"
+            // MP3 at 128 kbps ≈ 16 KB/s of audio; never larger than the source.
+            let estimatedMP3 = min(fileSize, Int64(recording.duration * 16_000))
+            return "~\(formatFileSize(max(estimatedMP3, 1024)))"
         }
     }
 
@@ -1191,9 +1198,12 @@ struct TranscriptionView: View {
         let safeName = sanitizeFilename(baseName)
 
         switch format {
-        case .wav:
-            panel.allowedContentTypes = [.wav]
-            panel.nameFieldStringValue = "\(safeName).wav"
+        case .original:
+            let ext = recording.fileURL.pathExtension.lowercased()
+            if let type = UTType(filenameExtension: ext) {
+                panel.allowedContentTypes = [type]
+            }
+            panel.nameFieldStringValue = "\(safeName).\(ext)"
             panel.begin { response in
                 guard response == .OK, let url = panel.url else { return }
                 try? FileManager.default.copyItem(at: recording.fileURL, to: url)

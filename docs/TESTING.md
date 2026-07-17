@@ -17,6 +17,7 @@ What exists, how to run it, and what "verified" means in this project. See [DEVE
 | `SpeakerLibraryTests` | cosine math + thresholds, library round-trip (iso8601!), case-insensitive upsert, auto-match writes `.speakers.json` without overwriting user names, clip candidate selection rules |
 | `SharedUtilsTests` | SSEParser (chunk boundaries, CRLF, multi-line data, [DONE]), MultipartFormData framing, KeychainStore round-trip (isolated service name) |
 | `WindowedAudioLoaderTests` | resample length/energy on synthetic WAVs (48 k mono, 44.1 k stereo mixdown, 16 k passthrough), near-empty rejection, **equivalence with FluidAudio's loader on the real fixture** (length ±0.5 %, RMS ±10 %) |
+| `RecordingFormatTests` / `CompressInPlaceTests` | format settings mapping (AAC caps at 48 k, never upsamples), **the exact recorder write path** (Float32 tap chunks → AAC AVAudioFile → playable m4a readable by WindowedAudioLoader, ~36 KB for 3 s), compress-in-place swap keeps sidecars + duration and skips already-compressed files |
 | `AudioRecorderTests` / `TranscriptionServiceTests` | model basics, formatter output, service initial state |
 
 **Integration — gated by a marker file, uses real models (~1.5 GB, cached after first run):**

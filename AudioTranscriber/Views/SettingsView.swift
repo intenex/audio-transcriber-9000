@@ -361,6 +361,25 @@ struct StorageSettingsTab: View {
     var body: some View {
         Form {
             Section {
+                Picker("Recording format", selection: recordingFormatBinding) {
+                    ForEach(RecordingFormat.allCases) { format in
+                        Text(format.displayName).tag(format.rawValue)
+                    }
+                }
+                Text("Applies to new recordings. Compressed AAC is transparent for speech and transcription; existing WAVs can be converted via right-click → Compress Audio.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Picker("When importing uncompressed audio", selection: importCompressionBinding) {
+                    Text("Ask each time").tag("ask")
+                    Text("Always compress").tag("always")
+                    Text("Keep original format").tag("never")
+                }
+            } header: {
+                Label("Audio Format", systemImage: "waveform.circle")
+            }
+
+            Section {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(storageDirectoryDisplay)
@@ -406,6 +425,20 @@ struct StorageSettingsTab: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private var recordingFormatBinding: Binding<String> {
+        Binding(
+            get: { UserDefaults.standard.string(forKey: "recordingFormat") ?? RecordingFormat.aacHigh.rawValue },
+            set: { UserDefaults.standard.set($0, forKey: "recordingFormat") }
+        )
+    }
+
+    private var importCompressionBinding: Binding<String> {
+        Binding(
+            get: { UserDefaults.standard.string(forKey: "importCompression") ?? "ask" },
+            set: { UserDefaults.standard.set($0, forKey: "importCompression") }
+        )
     }
 
     private var storageDirectoryDisplay: String {

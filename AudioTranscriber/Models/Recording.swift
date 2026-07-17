@@ -28,7 +28,9 @@ enum TranscriptionStatus: String, Codable {
 
 struct Recording: Identifiable, Codable {
     let id: UUID
-    let fileURL: URL
+    /// Mutable: compress-in-place swaps a .wav for its .m4a (same stem, so all
+    /// sidecars keep matching).
+    var fileURL: URL
     let date: Date
     var duration: TimeInterval
     var transcriptionURL: URL?

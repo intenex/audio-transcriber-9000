@@ -217,6 +217,10 @@ final class RecordingStore {
 
     // MARK: - Import
 
+    /// File types worth converting to AAC on import (already-compressed
+    /// formats like mp3/m4a are always copied as-is).
+    static let compressibleExtensions: Set<String> = ["wav", "aiff", "aif", "caf", "flac"]
+
     func importAudioFiles() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
@@ -225,16 +229,110 @@ final class RecordingStore {
         panel.message = "Select audio files to import for transcription"
 
         guard panel.runModal() == .OK else { return }
+        let urls = panel.urls
 
-        for sourceURL in panel.urls {
-            let destURL = uniqueURL(for: storageDirectory.appendingPathComponent(sourceURL.lastPathComponent))
-            do {
-                try FileManager.default.copyItem(at: sourceURL, to: destURL)
-                let duration = Self.audioDuration(for: destURL)
-                insert(Recording(fileURL: destURL, date: .now, duration: duration))
-            } catch {
-                errorMessage = "Failed to import \(sourceURL.lastPathComponent): \(error.localizedDescription)"
+        let compressibles = urls.filter {
+            Self.compressibleExtensions.contains($0.pathExtension.lowercased())
+        }
+        let shouldCompress = compressibles.isEmpty ? false : askImportCompression(for: compressibles)
+
+        Task { [weak self] in
+            guard let self else { return }
+            for sourceURL in urls {
+                let compress = shouldCompress
+                    && Self.compressibleExtensions.contains(sourceURL.pathExtension.lowercased())
+                await self.importOne(sourceURL, compress: compress)
             }
+        }
+    }
+
+    private func importOne(_ sourceURL: URL, compress: Bool) async {
+        do {
+            let recording: Recording
+            if compress {
+                let stem = sourceURL.deletingPathExtension().lastPathComponent
+                let destURL = uniqueURL(for: storageDirectory.appendingPathComponent("\(stem).m4a"))
+                _ = try await AudioCompressor.compress(source: sourceURL, to: destURL, spec: .storage)
+                recording = Recording(fileURL: destURL, date: .now,
+                                      duration: Self.audioDuration(for: destURL))
+            } else {
+                let destURL = uniqueURL(for: storageDirectory.appendingPathComponent(sourceURL.lastPathComponent))
+                try FileManager.default.copyItem(at: sourceURL, to: destURL)
+                recording = Recording(fileURL: destURL, date: .now,
+                                      duration: Self.audioDuration(for: destURL))
+            }
+            insert(recording)
+        } catch {
+            errorMessage = "Failed to import \(sourceURL.lastPathComponent): \(error.localizedDescription)"
+        }
+    }
+
+    /// Resolve the import-compression choice: settings can force always/never,
+    /// default is to ask per batch with an estimated size comparison.
+    private func askImportCompression(for files: [URL]) -> Bool {
+        switch defaults.string(forKey: "importCompression") {
+        case "always": return true
+        case "never": return false
+        default: break
+        }
+
+        let originalBytes = files.reduce(Int64(0)) { total, url in
+            let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+            return total + ((attrs?[.size] as? NSNumber)?.int64Value ?? 0)
+        }
+        let totalSeconds = files.reduce(0.0) { $0 + Self.audioDuration(for: $1) }
+        let compressedBytes = Int64(AudioCompressor.Spec.storage.estimatedBytes(forSeconds: totalSeconds))
+
+        let alert = NSAlert()
+        alert.messageText = "Compress imported audio?"
+        alert.informativeText = """
+        \(files.count) file\(files.count == 1 ? "" : "s") can be converted to high-quality AAC:
+        \(ByteCountFormatter.string(fromByteCount: originalBytes, countStyle: .file)) → ~\(ByteCountFormatter.string(fromByteCount: compressedBytes, countStyle: .file)).
+        Quality remains excellent for listening and transcription. Originals are not modified.
+        """
+        alert.addButton(withTitle: "Compress")
+        alert.addButton(withTitle: "Keep Original Format")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    // MARK: - Compress in place
+
+    /// Recordings currently being converted (UI shows progress / disables actions).
+    private(set) var compressingIDs: Set<UUID> = []
+
+    /// Converts an uncompressed recording to AAC in place: same file stem (so
+    /// every sidecar keeps matching), duration-verified, original deleted only
+    /// after the replacement checks out.
+    func compressAudio(_ recording: Recording) async {
+        guard Self.compressibleExtensions.contains(recording.fileURL.pathExtension.lowercased()),
+              !compressingIDs.contains(recording.id) else { return }
+        compressingIDs.insert(recording.id)
+        defer { compressingIDs.remove(recording.id) }
+
+        let destURL = recording.fileURL.deletingPathExtension().appendingPathExtension("m4a")
+        guard !FileManager.default.fileExists(atPath: destURL.path) else {
+            errorMessage = "\(destURL.lastPathComponent) already exists."
+            return
+        }
+
+        do {
+            _ = try await AudioCompressor.compress(source: recording.fileURL, to: destURL, spec: .storage)
+            let newDuration = Self.audioDuration(for: destURL)
+            let tolerance = max(1.0, recording.duration * 0.01)
+            guard newDuration > 0, abs(newDuration - recording.duration) <= tolerance else {
+                try? FileManager.default.removeItem(at: destURL)
+                errorMessage = "Compression aborted for \(recording.displayName): duration mismatch (\(Int(newDuration))s vs \(Int(recording.duration))s). Original kept."
+                return
+            }
+            let originalURL = recording.fileURL
+            update(recording.id) {
+                $0.fileURL = destURL
+                $0.duration = newDuration
+            }
+            try? FileManager.default.removeItem(at: originalURL)
+        } catch {
+            try? FileManager.default.removeItem(at: destURL)
+            errorMessage = "Compression failed for \(recording.displayName): \(error.localizedDescription)"
         }
     }
 
