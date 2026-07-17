@@ -20,6 +20,8 @@ final class AudioRecorder: NSObject {
     /// Called with the new recording's ID after it lands in the store
     /// (used for the auto-transcribe setting).
     var onNewRecording: ((UUID) -> Void)? = nil
+    /// Live transcript preview sink (optional; fed from the tap callback).
+    var liveTranscriber: LiveTranscriber? = nil
     private var audioEngine: AVAudioEngine?
     private var audioFile: AVAudioFile?
     private var audioPlayer: AVAudioPlayer?
@@ -114,6 +116,7 @@ final class AudioRecorder: NSObject {
 
                 var firstWriteError: Error? = nil
                 var didAttemptFirstWrite = false
+                let live = self.liveTranscriber
                 inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
                     do {
                         try file.write(from: buffer)
@@ -121,6 +124,7 @@ final class AudioRecorder: NSObject {
                         if !didAttemptFirstWrite { firstWriteError = error }
                     }
                     didAttemptFirstWrite = true
+                    live?.feed(buffer)
                 }
 
                 engine.prepare()
@@ -147,6 +151,7 @@ final class AudioRecorder: NSObject {
             self.recordingStartDate = Date()
             self.sleepGuard = SleepGuard(reason: "Recording audio")
             self.startTimer()
+            self.liveTranscriber?.start()
             NSLog("[AudioRecorder] Recording state updated")
         } catch {
             NSLog("[AudioRecorder] Failed: \(error)")
@@ -175,6 +180,7 @@ final class AudioRecorder: NSObject {
         stopTimer()
         isRecording = false
         sleepGuard = nil
+        liveTranscriber?.stop()
 
         // Authoritative duration = frames actually written; wall-clock as fallback.
         let fileDuration = sampleRate > 0 ? Double(writtenFrames) / sampleRate : 0

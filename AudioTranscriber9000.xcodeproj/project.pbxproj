@@ -19,6 +19,7 @@
 		241AB6C00C02BABB90650A3C /* LocalFluidAudioEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66709307226A3BCCAAE6940A /* LocalFluidAudioEngine.swift */; };
 		2574D8749679904AE7984793 /* RecordingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1D25CBB8A2FC74690700D40 /* RecordingStore.swift */; };
 		27DFDC643D0C48496B48D014 /* TranscriptionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF52D197E0BCB41721F4B816 /* TranscriptionEngine.swift */; };
+		2AECE0F536849E5B196328B0 /* LiveTranscriber.swift in Sources */ = {isa = PBXBuildFile; fileRef = 836CBD407726890DF52700B3 /* LiveTranscriber.swift */; };
 		2CFB63B3913B7A4BA0C49749 /* WordTimingAssembler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76862B769E69237CCF980E80 /* WordTimingAssembler.swift */; };
 		2DDCD292CB39D57AE9BAA58D /* InteractiveTranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5412D6EEB8C6D14CFFD769 /* InteractiveTranscriptView.swift */; };
 		2F0CA54BCE99A9B3DD6DB264 /* ChatProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC3F8E2812F21068C68AE6DB /* ChatProvider.swift */; };
@@ -114,6 +115,7 @@
 		671BF077C8DD38C71D49DAA4 /* SpeakerMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMatcher.swift; sourceTree = "<group>"; };
 		76862B769E69237CCF980E80 /* WordTimingAssembler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WordTimingAssembler.swift; sourceTree = "<group>"; };
 		7802F7F1524E5E7DC3AB537B /* LocalMLXChatProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalMLXChatProvider.swift; sourceTree = "<group>"; };
+		836CBD407726890DF52700B3 /* LiveTranscriber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranscriber.swift; sourceTree = "<group>"; };
 		83FC8A65191A20F31BA16125 /* SpeakerLibraryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerLibraryTests.swift; sourceTree = "<group>"; };
 		863404946DAADD38D657F4F5 /* SSEParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSEParser.swift; sourceTree = "<group>"; };
 		87AD1C57AAB5B6F7994EACC6 /* AudioRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorder.swift; sourceTree = "<group>"; };
@@ -298,6 +300,7 @@
 			isa = PBXGroup;
 			children = (
 				87AD1C57AAB5B6F7994EACC6 /* AudioRecorder.swift */,
+				836CBD407726890DF52700B3 /* LiveTranscriber.swift */,
 				33F4DE33ABF9936217E52B1B /* ModelManager.swift */,
 				A1D25CBB8A2FC74690700D40 /* RecordingStore.swift */,
 				4498CCAC06D1956CE57FD2C4 /* SleepGuard.swift */,
@@ -452,6 +455,7 @@
 				74810BB3993865BA2AEBAB4F /* DiarizedJSONResponse.swift in Sources */,
 				2DDCD292CB39D57AE9BAA58D /* InteractiveTranscriptView.swift in Sources */,
 				A85520666053D6A557CE8C4C /* KeychainStore.swift in Sources */,
+				2AECE0F536849E5B196328B0 /* LiveTranscriber.swift in Sources */,
 				241AB6C00C02BABB90650A3C /* LocalFluidAudioEngine.swift in Sources */,
 				7A8B943EAC9984B2FEBFBDCD /* LocalMLXChatProvider.swift in Sources */,
 				7C2FE0D3BB2A800FDAC94027 /* ModelManager.swift in Sources */,

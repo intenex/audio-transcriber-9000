@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RecordingControlView: View {
     @Environment(AudioRecorder.self) private var audioRecorder
+    @Environment(LiveTranscriber.self) private var liveTranscriber
 
     var body: some View {
         VStack(spacing: 0) {
@@ -66,6 +67,12 @@ struct RecordingControlView: View {
                 }
             }
 
+            // Live transcript preview while recording
+            if audioRecorder.isRecording && liveTranscriber.isRunning {
+                livePreview
+                    .padding(.top, 24)
+            }
+
             Spacer()
 
             // Bottom brand
@@ -79,6 +86,42 @@ struct RecordingControlView: View {
             .padding(.bottom, 20)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var livePreview: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    if liveTranscriber.displayText.isEmpty {
+                        Text("Listening…")
+                            .font(.callout)
+                            .foregroundStyle(.tertiary)
+                    } else {
+                        (Text(liveTranscriber.confirmedText)
+                            .foregroundStyle(.primary)
+                         + Text(liveTranscriber.volatileText)
+                            .foregroundStyle(.secondary))
+                            .font(.callout)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    Color.clear.frame(height: 1).id("live-end")
+                }
+                .padding(14)
+            }
+            .onChange(of: liveTranscriber.displayText) { _, _ in
+                proxy.scrollTo("live-end", anchor: .bottom)
+            }
+        }
+        .frame(maxWidth: 520, maxHeight: 140)
+        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(alignment: .topLeading) {
+            Label("Live preview", systemImage: "waveform")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.tertiary)
+                .padding(.top, -8)
+                .padding(.leading, 10)
+                .background(.background.opacity(0.01))
+        }
     }
 
     private var timerString: String {

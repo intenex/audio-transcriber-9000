@@ -8,6 +8,7 @@ struct AudioTranscriberApp: App {
     @State private var chatService = ChatService()
     @State private var modelManager = ModelManager()
     @State private var speakerLibrary = SpeakerLibraryStore()
+    @State private var liveTranscriber = LiveTranscriber()
 
     var body: some Scene {
         WindowGroup {
@@ -18,10 +19,12 @@ struct AudioTranscriberApp: App {
                 .environment(chatService)
                 .environment(modelManager)
                 .environment(speakerLibrary)
+                .environment(liveTranscriber)
                 .onAppear {
                     recordingStore.load()
                     speakerLibrary.attach(storageDirectory: recordingStore.storageDirectory)
                     audioRecorder.attach(store: recordingStore)
+                    audioRecorder.liveTranscriber = liveTranscriber
                     transcriptionService.attach(store: recordingStore, chatService: chatService,
                                                 speakerLibrary: speakerLibrary)
                     transcriptionService.cloudEngineFactory = { kind in
