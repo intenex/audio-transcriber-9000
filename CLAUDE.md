@@ -26,5 +26,8 @@ Do NOT skip these steps. Do NOT claim "everything works" without actually runnin
 
 - Bundle ID: `com.audiortranscriber.AudioTranscriber`
 - Build product: `~/Library/Developer/Xcode/DerivedData/AudioTranscriber9000-*/Build/Products/Debug/Audio Transcriber 9000.app`
-- XcodeGen: run `xcodegen generate` after modifying `project.yml`
+- XcodeGen: run `xcodegen generate` after modifying `project.yml` (or after adding/removing source files)
 - TCC/Microphone: requires manual permission grant in System Settings for recording to work
+- Transcription is native Swift (FluidAudio SPM, pinned 0.12.4) — no Python/conda involved. conda env `transcriber` is only used by the optional local mlx-lm chat provider (`scripts/generate.py`)
+- Integration tests (real models): `touch /tmp/audiotranscriber-integration-tests` then run `-only-testing:AudioTranscriberTests/LocalEngineIntegrationTests` (and ResumeIntegrationTests); remove the marker after
+- Test module is `@testable import AudioTranscriber` (PRODUCT_MODULE_NAME override)

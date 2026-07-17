@@ -21,6 +21,7 @@ struct AudioTranscriberApp: App {
                 .environment(speakerLibrary)
                 .environment(liveTranscriber)
                 .onAppear {
+                    LegacySettingsMigrator.runOnce()
                     recordingStore.load()
                     speakerLibrary.attach(storageDirectory: recordingStore.storageDirectory)
                     audioRecorder.attach(store: recordingStore)

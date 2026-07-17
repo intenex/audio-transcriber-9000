@@ -8,253 +8,85 @@ A native macOS app for recording audio, transcribing speech to text with speaker
 
 ## Features
 
-- **Recording** — Record audio directly from any microphone. Live timer display, Space bar shortcut to start/stop.
-- **Import** — Drag in or import existing audio files (wav, mp3, m4a, etc.) via Cmd+I.
-- **Transcription** — Converts speech to text using [whisperX](https://github.com/m-bain/whisperX) with word-level timestamps.
-- **Speaker diarization** — Identifies and labels who said what (SPEAKER_00, SPEAKER_01, etc.) using pyannote.audio.
-- **Summarization** — Auto-generates a summary, action items, and a suggested recording name after each transcription.
-- **Chat** — Ask questions about any individual recording, or chat across all recordings at once.
-- **Search** — Search by keyword across all recording names and transcript content from the sidebar. Find-in-transcript with highlighting in the detail view.
-- **Rename** — Rename recordings manually or use the AI-suggested name with one click.
-- **Export** — Copy transcript to clipboard or export as a Markdown file.
+- **Recording** — Record audio directly from any microphone. Live timer, live transcript preview while you speak, Space bar shortcut, sleep prevention during long sessions.
+- **Import** — Import existing audio files (wav, mp3, m4a, etc.) via Cmd+I.
+- **On-device transcription** — [FluidAudio](https://github.com/FluidInference/FluidAudio) running Parakeet TDT v3 + pyannote speaker diarization on the Apple Neural Engine. Roughly 30–100× realtime, fully offline and private, with word-level timestamps.
+- **Resumable jobs** — Long transcriptions checkpoint every ~3 minutes of audio. Pause anytime, quit the app, and resume exactly where it left off. Accurate time-remaining estimates calibrated to your machine.
+- **Transcription queue** — Queue several recordings; they process one after another with progress and notifications.
+- **Cloud engines (optional)** — Per-recording choice of OpenAI `gpt-4o-transcribe-diarize` (with enrolled-voice references) or AssemblyAI (best for very long files — single upload, no splitting). Cost estimates shown before sending; audio is compressed to 16 kHz mono AAC first.
+- **Speaker voices** — Name a speaker once and the app remembers their voice (on-device embeddings). Future recordings are auto-labeled; cloud transcriptions receive reference clips so speakers come back already named.
+- **Summarization** — Auto-generates a summary, action items, and a suggested name after each transcription.
+- **Chat** — Ask questions about one recording or all of them. Providers: MiniMax (international endpoint), OpenAI, any OpenAI-compatible custom endpoint, or local mlx-lm.
+- **Categories** — Group recordings into collapsible sidebar sections (e.g. Work, Therapy, Ideas).
+- **Interactive transcript** — Click any word to play from that moment; the current word highlights during playback. Per-transcript search, speaker renaming, playback speed control and scrubbing.
+- **Export** — Transcript/summary/chat as Markdown (with your custom speaker names), audio as WAV or size-estimated MP3.
 
 ---
 
 ## Requirements
 
-- **macOS 14.0 (Sonoma)** or later
-- **Apple Silicon Mac** (M1+) — required for the mlx-lm AI features
-- **Miniconda** — manages the Python environment
-- **Xcode** — to build the app from source
-- **[XcodeGen](https://github.com/yonaskolb/XcodeGen)** — to generate the `.xcodeproj` (setup.sh installs this)
-- **HuggingFace account** — for speaker diarization model access (free)
+- **macOS 14.0 (Sonoma)** or later, **Apple Silicon** (M1+)
+- **Xcode 16+** and **[XcodeGen](https://github.com/yonaskolb/XcodeGen)** to build from source
+- ~1.5 GB one-time speech-model download (automatic on first transcription, or from Settings → Transcription)
+
+Optional:
+- **API keys** for cloud engines/chat (OpenAI, AssemblyAI, MiniMax) — entered in Settings, stored in the macOS Keychain
+- **Miniconda + mlx-lm** only if you want fully local AI chat/summaries:
+  `conda create -n transcriber python=3.11 && conda run -n transcriber pip install mlx-lm`
 
 ---
 
-## First-Time Setup
-
-### 1. Install Miniconda
-
-If you don't have conda, install [Miniconda](https://docs.conda.io/en/latest/miniconda.html):
+## Build & Run
 
 ```bash
-# Download and run the Apple Silicon installer
-curl -O https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-arm64.sh
-bash Miniconda3-latest-MacOSX-arm64.sh
-# Restart your terminal after installation
+xcodegen generate
+xcodebuild -project AudioTranscriber9000.xcodeproj -scheme AudioTranscriber9000 -configuration Debug build
+open ~/Library/Developer/Xcode/DerivedData/AudioTranscriber9000-*/Build/Products/Debug/"Audio Transcriber 9000.app"
 ```
 
-### 2. Get a HuggingFace token
+Grant microphone access in System Settings → Privacy & Security → Microphone when prompted.
 
-Speaker diarization requires access to pyannote.audio models, which are gated behind a free HuggingFace account:
-
-1. Create a free account at [huggingface.co](https://huggingface.co)
-2. Generate an access token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
-3. Accept the model license terms for both of these (just click "Accept" on each page while logged in):
-   - [pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1)
-   - [pyannote/segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0)
-
-### 3. Clone the repo and run setup
+Run tests:
 
 ```bash
-git clone <this-repo>
-cd audio-transcriber
-./setup.sh
-```
-
-`setup.sh` does the following automatically:
-
-- Installs XcodeGen via Homebrew (if not already installed)
-- Creates a `transcriber` conda environment with Python 3.11
-- Installs all Python dependencies (whisperX, pyannote.audio, torch, mlx-lm, etc.)
-- Pre-downloads the Whisper `large-v3` model weights (~3GB)
-- Pre-downloads the default AI model for summarization/chat — `mlx-community/Mistral-7B-Instruct-v0.3-4bit` (~4GB)
-- Generates the Xcode project
-
-> **Note:** Setup downloads ~7GB of model weights total. Plan for 10–30 minutes depending on your internet connection.
-
-### 4. Build and open in Xcode
-
-```bash
-open AudioTranscriber9000.xcodeproj
-```
-
-Build and run with Cmd+R. The app is **not notarized**, so the first time you open it outside of Xcode, right-click → Open to bypass Gatekeeper.
-
-### 5. Grant microphone permission
-
-On first launch, macOS will ask for microphone access. If you miss the prompt, go to:
-
-**System Settings → Privacy & Security → Microphone → Audio Transcriber 9000**
-
-### 6. Paste your HuggingFace token
-
-Open **Settings** (gear icon in sidebar) → **General** → paste your token in the HuggingFace Token field.
-
----
-
-## Architecture
-
-```
-audio-transcriber/
-├── AudioTranscriber/
-│   ├── App/
-│   │   ├── AudioTranscriberApp.swift   # App entry point, environment injection
-│   │   ├── ContentView.swift           # Root NavigationSplitView
-│   │   └── Theme.swift                 # AppTheme colors and gradients
-│   ├── Models/
-│   │   ├── Recording.swift             # Recording struct (id, fileURL, name, status)
-│   │   ├── Transcription.swift         # TranscriptionResult, MarkdownFormatter
-│   │   ├── Summary.swift               # RecordingSummary struct
-│   │   └── ChatMessage.swift           # ChatMessage, ChatRole, ChatHistory
-│   ├── Services/
-│   │   ├── AudioRecorder.swift         # AVAudioEngine recording, playback, import
-│   │   ├── TranscriptionService.swift  # Runs transcribe.py subprocess
-│   │   ├── LLMService.swift            # Runs generate.py subprocess (mlx-lm)
-│   │   └── SummarizationService.swift  # Prompt construction, summary JSON parsing
-│   │   └── SearchService.swift         # Exact and natural-language search
-│   └── Views/
-│       ├── RecordingListView.swift     # Sidebar: list, search, rename, global chat
-│       ├── RecordingControlView.swift  # Hero recording screen (no selection)
-│       ├── TranscriptionView.swift     # Detail: transcript / summary / chat tabs
-│       ├── ChatView.swift              # Per-recording AI chat
-│       ├── GlobalChatView.swift        # Cross-recording AI chat
-│       └── SettingsView.swift          # General / Storage / AI settings tabs
-├── scripts/
-│   ├── transcribe.py                   # whisperX pipeline, emits JSON to stdout
-│   ├── generate.py                     # mlx-lm streaming generation
-│   ├── environment.yml                 # Conda environment spec
-│   └── requirements.txt               # pip dependencies
-├── setup.sh                            # First-time setup script
-├── build-release.sh                    # Builds release DMG
-└── project.yml                         # XcodeGen project spec
-```
-
-### How transcription works
-
-1. Swift launches `conda run -n transcriber python scripts/transcribe.py <audio> <hf_token>` as a subprocess
-2. The script loads whisperX (faster-whisper backend), transcribes, aligns word timestamps, and runs pyannote.audio diarization
-3. Progress is emitted to **stderr** as `PROGRESS:<percent>:<message>` lines, parsed by Swift's `readabilityHandler`
-4. Final JSON is emitted to **stdout** and parsed by Swift after the process exits
-5. Swift writes a `.md` sidecar file next to the audio file with formatted speaker-labeled markdown
-
-### How AI features work
-
-1. Swift launches `conda run -n transcriber python scripts/generate.py --messages <json> ...`
-2. The script loads the mlx-lm model (cached in `~/.cache/huggingface/hub/`) and streams tokens to **stdout**
-3. For chat (streaming), Swift reads tokens via `readabilityHandler` as they arrive and yields them through an `AsyncThrowingStream`
-4. For summarization (non-streaming), Swift reads full stdout after the process exits and parses JSON
-
-### Sidecar files
-
-Each recording `recording_<id>.wav` can have:
-
-- `recording_<id>.md` — full speaker-diarized transcript (Markdown)
-- `recording_<id>.summary.json` — AI-generated summary, action items, suggested name
-- `recording_<id>.chat.json` — per-recording chat history
-- `.global-chat.json` — global chat history (in storage directory root)
-
----
-
-## Settings
-
-| Setting           | Location | Description                                                                               |
-| ----------------- | -------- | ----------------------------------------------------------------------------------------- |
-| HuggingFace Token | General  | Required for speaker diarization                                                          |
-| Whisper Model     | General  | `large-v3` recommended; smaller models are faster                                         |
-| Storage Location  | Storage  | Where recordings are saved (default: `~/Documents/AudioTranscriber/`)                     |
-| AI Model          | AI       | mlx-lm model ID from HuggingFace (default: `mlx-community/Mistral-7B-Instruct-v0.3-4bit`) |
-
----
-
-## AI Features
-
-AI features require `mlx-lm` installed in the `transcriber` conda environment. If you ran `setup.sh`, it's already installed. If not:
-
-```bash
-conda run -n transcriber pip install mlx-lm
-```
-
-**Summarization** runs automatically after each transcription if the AI is available. It generates:
-
-- A 2–3 paragraph summary
-- A bulleted action items list
-- A suggested 5-word recording name
-
-**Chat** lets you ask questions about a specific recording's transcript. The full transcript (up to ~6,000 words) is passed as context.
-
-**Global Chat** builds a manifest of all recordings (names, dates, summaries, transcript previews) and lets you ask questions across your entire library.
-
-The default model (`mlx-community/Mistral-7B-Instruct-v0.3-4bit`) is ~4GB and runs entirely on-device. You can switch to any mlx-community model in Settings → AI.
-
----
-
-## Building for Distribution
-
-```bash
-./build-release.sh
-```
-
-This produces `build/AudioTranscriber9000.dmg` — a drag-to-install DMG with a symlink to `/Applications`.
-
-The build is **ad-hoc signed** (not notarized). Recipients will need to right-click → Open the first time to bypass Gatekeeper. For notarized distribution without the warning:
-
-1. Enroll in the [Apple Developer Program](https://developer.apple.com/programs/) ($99/year)
-2. Set your team ID in `project.yml`
-3. Sign, notarize, and staple:
-   ```bash
-   codesign --deep --force --sign "Developer ID Application: Your Name" "build/.../Audio Transcriber 9000.app"
-   xcrun notarytool submit build/AudioTranscriber9000.dmg --apple-id you@email.com --team-id YOURTEAMID --wait
-   xcrun stapler staple build/AudioTranscriber9000.dmg
-   ```
-
----
-
-## Conda Environment
-
-The `transcriber` environment is defined in `scripts/environment.yml`. Key packages:
-
-| Package                | Purpose                               |
-| ---------------------- | ------------------------------------- |
-| `whisperx`             | Speech-to-text with word alignment    |
-| `pyannote.audio`       | Speaker diarization                   |
-| `torch` / `torchaudio` | ML backend for both of the above      |
-| `mlx-lm`               | On-device LLM inference via Apple MLX |
-| `scipy`, `soundfile`   | Audio file handling                   |
-
-To update the environment after pulling changes:
-
-```bash
-conda env update -n transcriber -f scripts/environment.yml --prune
-```
-
-To start fresh:
-
-```bash
-conda env remove -n transcriber
-./setup.sh
+xcodebuild -project AudioTranscriber9000.xcodeproj -scheme AudioTranscriber9000 test
+# Real-model integration tests (downloads models on first run):
+touch /tmp/audiotranscriber-integration-tests
+xcodebuild -project AudioTranscriber9000.xcodeproj -scheme AudioTranscriber9000 test \
+  -only-testing:AudioTranscriberTests/LocalEngineIntegrationTests
+rm /tmp/audiotranscriber-integration-tests
 ```
 
 ---
 
-## Troubleshooting
+## Storage layout
 
-**"Microphone access denied"**
-Go to System Settings → Privacy & Security → Microphone and enable the app. Due to macOS TCC (Transparency, Consent, and Control), the permission prompt only appears once — if you denied it, you must grant it manually.
+Recordings live in `~/Documents/AudioTranscriber/` (configurable in Settings → Storage). Each recording keeps sidecar files next to its WAV:
 
-**Transcription fails immediately**
+| File | Contents |
+|---|---|
+| `recordings.json` | Library manifest (names, statuses, categories) |
+| `<name>.md` | Markdown transcript |
+| `<name>.segments.json` | Word-level timestamped segments |
+| `<name>.speakers.json` | Speaker ID → display-name map |
+| `<name>.summary.json` | Summary, action items, suggested name |
+| `<name>.chat.json` | Per-recording chat history |
+| `<name>.partial.json` | Resumable transcription checkpoint (deleted on completion) |
+| `SpeakerLibrary/` | Enrolled voice embeddings + reference clips |
 
-- Check that your HuggingFace token is set in Settings → General
-- Confirm you accepted the model terms for both pyannote models (links above)
-- Check that the `transcriber` conda environment exists: `conda env list`
+The directory is the source of truth: drop a `.wav` in and it appears in the app; the manifest heals itself.
 
-**AI features show "Not Available"**
+---
 
-- Run `conda run -n transcriber python -c "import mlx_lm"` in Terminal — if it errors, reinstall: `conda run -n transcriber pip install mlx-lm`
-- Click "Check" in Settings → AI to re-run the availability check
+## Distribution
 
-**First transcription is very slow**
-The Whisper model loads from disk each time (no persistent process). `large-v3` takes 30–60 seconds to initialize on first load. Smaller models (`medium`, `small`) are faster with some quality tradeoff.
+`./build-release.sh` builds Release and produces `build/AudioTranscriber9000.dmg`. Builds are ad-hoc signed; recipients right-click → Open the first time.
 
-**App quits unexpectedly after granting mic permission**
-This is a known macOS behavior with ad-hoc signed apps — the TCC database uses code-hash-based entries that go stale after each build. Quit and reopen the app; if it persists, re-grant permission in System Settings.
+---
+
+## Architecture notes
+
+- SwiftUI + `@Observable`, macOS 14+. No sandbox (subprocess + arbitrary storage-dir access).
+- Transcription engines implement one `TranscriptionEngine` protocol: `LocalFluidAudioEngine` (chunked, checkpointed, cancellable), `OpenAITranscriptionEngine` (25 MB part splitting + cross-part speaker continuity), `AssemblyAITranscriptionEngine` (upload + poll).
+- Chat providers implement `ChatProvider`: one OpenAI-compatible SSE client covers MiniMax/OpenAI/custom; `LocalMLXChatProvider` keeps a warm `generate.py --server` child.
+- API keys in Keychain; realtime-factor ETA calibration in UserDefaults; per-machine.
