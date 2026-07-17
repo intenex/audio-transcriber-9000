@@ -4,13 +4,14 @@ What exists, how to run it, and what "verified" means in this project. See [DEVE
 
 ## Test suites (Tests/AudioTranscriberTests/, `@testable import AudioTranscriber`)
 
-**Unit — always run, no network, no models (164 tests as of 2026-07-17):**
+**Unit — always run, no network, no models (171 tests as of 2026-07-17):**
 
 | Suite | Covers |
 |---|---|
 | `TranscriptionLogicTests` | ChunkPlanner (snap/coverage/determinism), SpeakerAssigner (overlap/ties/nearest/normalize), TranscriptMerger (split rules, interpolation), TranscriptionCheckpoint (round-trip, resume skip, fingerprint discard), RTF/ETA math + formatter |
 | `WordTimingAssemblerTests` | token→word assembly incl. the leading-space normalization gotcha |
 | `RecordingStoreTests` | manifest round-trip, legacy UserDefaults migration, orphan adoption, crash-artifact skip, status repair, category rename-merge/delete cascades, sidecar deletion, tolerant status decode |
+| `RecordingMetaTests` | `.meta.json` sidecar: written on insert/change (no-op updates leave the file byte-identical), **library reconstructs from the directory alone with stable UUIDs/names/categories** after deleting recordings.json, external (synced-in) meta edits win on reload, legacy-library backfill, delete cleanup |
 | `TranscriptionQueueTests` | queue semantics with `MockTranscriptionEngine`: serial order, dedupe, pause keeps checkpoint → `.paused`, cancel deletes → `.pending`, failure → `.failed`, sidecar bytes written |
 | `ChatProviderTests` / `ChatServiceSelectionTests` | SSE token streaming, system-prompt prepend, MiniMax `reasoning_content` + `base_resp` error on HTTP 200, 401/missing-key paths, undecodable-chunk tolerance; provider auto-selection (MiniMax→OpenAI→local, explicit wins) |
 | `CloudEngineTests` | AudioSplitPlanner (25 MB math vs the real 4 h 56 m duration), PartMerger (offsets, canonical minting, enrolled-name propagation, S-token continuity), diarized_json + AssemblyAI response parsing, cost estimator, **mocked AssemblyAI end-to-end flow with real audio compression** |

@@ -99,9 +99,10 @@ struct Recording: Identifiable, Codable {
     var speakersURL: URL { sidecar("speakers.json") }
     var checkpointURL: URL { sidecar("partial.json") }
     var markdownURL: URL { sidecar("md") }
+    var metaURL: URL { sidecar("meta.json") }
 
     /// All sidecar files that belong to this recording.
     var allSidecarURLs: [URL] {
-        [markdownURL, segmentsURL, summaryURL, chatURL, speakersURL, checkpointURL]
+        [markdownURL, segmentsURL, summaryURL, chatURL, speakersURL, checkpointURL, metaURL]
     }
 }

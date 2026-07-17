@@ -17,7 +17,8 @@ How to work on this codebase without regressing it. Read [ARCHITECTURE.md](ARCHI
 - **Checkpoint chunk plans are immutable on resume.** Never recompute the plan for an existing checkpoint — VAD nondeterminism or config drift would misalign completed chunks. Changing checkpoint semantics ⇒ bump `TranscriptionCheckpoint.currentVersion` (old checkpoints are then discarded, which is safe).
 - **`TranscriptionStatus` decoding is tolerant** (unknown → `.pending`). Keep it that way; old manifests must never fail to load. Every `switch` over the enum is exhaustive — the compiler walks you through new cases.
 - **Secrets go in Keychain**, never UserDefaults. New key ⇒ add a `SecretKey` case. New UserDefaults key ⇒ add it to the inventory in ARCHITECTURE.md.
-- **recordings.json is authoritative but self-healing** — code must survive a deleted/corrupt manifest (orphan adoption rebuilds it). Don't add state that can't be reconstructed or tolerated as lost.
+- **recordings.json is a rebuildable cache; `.meta.json` is the durable metadata source.** Code must survive a deleted/corrupt manifest (orphan adoption + meta sidecars rebuild it, stable UUIDs included). Metadata edits (name/category/engineUsed) must go through `store.update`/the category APIs — direct array mutation would leave the sidecar stale. Don't add state that can't be reconstructed or tolerated as lost.
+- **All library writes are atomic via `AtomicFile`** — never `data.write(to:)` a sidecar directly; partial files must be unobservable (sync agents upload mid-write otherwise).
 
 ## Concurrency rules (violations here were real crashes)
 

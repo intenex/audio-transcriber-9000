@@ -121,7 +121,10 @@ Shared: `AudioCompressor` — windowed **AVAudioFile** reads + persistent AVAudi
 | `<stem>.summary.json` | RecordingSummary | SummarizationService |
 | `<stem>.chat.json` | ChatHistory | ChatSessionView |
 | `<stem>.partial.json` | TranscriptionCheckpoint (deleted on success) | LocalFluidAudioEngine |
+| `<stem>.meta.json` | `RecordingMeta` — durable identity + user metadata (version, **id**, date, duration, name, category, engineUsed, fileSizeBytes, updatedAt; deliberately NO status) | RecordingStore (insert/update/load-backfill; no-op writes skipped so updatedAt stays honest) |
 `Recording.allSidecarURLs` is the single deletion list — extend it when adding a sidecar.
+
+**recordings.json is a rebuildable cache** as of the sync hardening: `.meta.json` is the durable metadata source (applied over manifest entries at load; orphan adoption reconstructs full identity from it, so a rebuilt or synced-in library keeps stable UUIDs, names, categories, attribution). Categories additionally live in the synced master list `<storageDir>/library.json` (`LibraryFile`: version/categories/updatedAt); load() unions manifest ∪ library.json ∪ adopted recordings' categories. All metadata edits must go through `store.update`/category APIs so the sidecar stays fresh. Every whole-file library write goes through `AtomicFile` (atomic replace; future NSFileCoordinator hook).
 
 **Secrets**: Keychain only (`KeychainStore`, kSecClassGenericPassword, service = the fixed constant `com.audiortranscriber.AudioTranscriber` — NOT `Bundle.main.bundleIdentifier`, so a future iOS app with a different bundle id finds the same items; `SecretKey`: `openai.apiKey`, `minimax.apiKey`, `assemblyai.apiKey`, `custom.apiKey`). `set` with an empty/whitespace value is a **no-op** — removal is only ever the explicit `delete` (a transiently empty text field must never destroy a key); `set` returns a discardable `Bool` so the UI can surface failures. `InMemorySecretsStore` for tests. Never mirror secrets into UserDefaults.
 

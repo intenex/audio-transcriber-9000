@@ -44,6 +44,11 @@ final class RecordingStore {
         storageDirectory.appendingPathComponent(Self.manifestFileName)
     }
 
+    /// Synced master list of categories (the manifest's copy is a local cache).
+    private var libraryFileURL: URL {
+        storageDirectory.appendingPathComponent("library.json")
+    }
+
     // MARK: - Load / migrate
 
     func load() {
@@ -60,6 +65,10 @@ final class RecordingStore {
         } else if let legacy = migrateLegacyDefaultsIfPresent() {
             loaded = legacy
         }
+
+        // .meta.json is the durable metadata source; the manifest is a cache.
+        // Applying it here is what makes edits from another synced device land.
+        loaded = loaded.map { applyMetaIfPresent(to: $0) }
 
         // Drop entries whose audio file no longer exists.
         loaded = loaded.filter { FileManager.default.fileExists(atPath: $0.fileURL.path) }
@@ -94,9 +103,26 @@ final class RecordingStore {
             }
         }
 
+        // Categories: union of manifest cache, the synced library.json master
+        // list, and whatever adopted recordings reference.
+        if let data = try? Data(contentsOf: libraryFileURL),
+           let file = try? Self.decoder().decode(LibraryFile.self, from: data) {
+            for cat in file.categories where !loadedCategories.contains(cat) {
+                loadedCategories.append(cat)
+            }
+        }
+        for cat in loaded.compactMap(\.category).sorted() where !loadedCategories.contains(cat) {
+            loadedCategories.append(cat)
+        }
+
         recordings = loaded.sorted { $0.date > $1.date }
         categories = loadedCategories
         saveNow()
+
+        // Backfill/refresh .meta.json sidecars (no-op when content is current).
+        for recording in recordings {
+            writeMetaIfChanged(for: recording)
+        }
     }
 
     /// Re-resolve the storage directory from settings and reload the library
@@ -129,10 +155,23 @@ final class RecordingStore {
             // Skip crash artifacts from old builds (header-only WAVs).
             if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 4096 { continue }
 
-            let creation = (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .now
             let markdown = url.deletingPathExtension().appendingPathExtension("md")
             let hasTranscript = FileManager.default.fileExists(atPath: markdown.path)
-            var recording = Recording(fileURL: url, date: creation, duration: Self.audioDuration(for: url))
+
+            var recording: Recording
+            if let meta = Self.readMeta(besides: url) {
+                // A .meta.json sibling restores full identity — same UUID,
+                // name, category, attribution — so a rebuilt (or synced-in)
+                // library is indistinguishable from the original.
+                recording = Recording(id: meta.id, fileURL: url, date: meta.date,
+                                      duration: meta.duration,
+                                      name: meta.name, category: meta.category,
+                                      engineUsed: meta.engineUsed,
+                                      fileSizeBytes: meta.fileSizeBytes)
+            } else {
+                let creation = (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .now
+                recording = Recording(fileURL: url, date: creation, duration: Self.audioDuration(for: url))
+            }
             if hasTranscript {
                 recording.transcriptionURL = markdown
                 recording.status = .done
@@ -140,6 +179,44 @@ final class RecordingStore {
             orphans.append(recording)
         }
         return orphans
+    }
+
+    // MARK: - Metadata sidecars
+
+    private static func readMeta(besides audioURL: URL) -> RecordingMeta? {
+        let metaURL = audioURL.deletingPathExtension().appendingPathExtension("meta.json")
+        guard let data = try? Data(contentsOf: metaURL) else { return nil }
+        return try? Self.decoder().decode(RecordingMeta.self, from: data)
+    }
+
+    /// Overlay the durable sidecar metadata onto a manifest entry. The
+    /// sidecar wins for identity and user-edited fields; runtime state
+    /// (status, transcriptionURL, fileURL) stays with the entry.
+    private func applyMetaIfPresent(to entry: Recording) -> Recording {
+        guard let meta = Self.readMeta(besides: entry.fileURL) else { return entry }
+        var merged = Recording(id: meta.id, fileURL: entry.fileURL, date: meta.date,
+                               duration: meta.duration > 0 ? meta.duration : entry.duration,
+                               transcriptionURL: entry.transcriptionURL, status: entry.status,
+                               name: meta.name, category: meta.category,
+                               engineUsed: meta.engineUsed,
+                               fileSizeBytes: meta.fileSizeBytes ?? entry.fileSizeBytes)
+        if merged.transcriptionURL == nil,
+           FileManager.default.fileExists(atPath: merged.markdownURL.path) {
+            merged.transcriptionURL = merged.markdownURL
+        }
+        return merged
+    }
+
+    /// Write `<stem>.meta.json` when its content differs from the recording
+    /// (skipping no-ops keeps `updatedAt` an honest last-edit marker).
+    private func writeMetaIfChanged(for recording: Recording) {
+        let meta = RecordingMeta(recording: recording)
+        if let existing = Self.readMeta(besides: recording.fileURL), meta.sameContent(as: existing) {
+            return
+        }
+        if let data = try? Self.encoder().encode(meta) {
+            try? AtomicFile.write(data, to: recording.metaURL)
+        }
     }
 
     // MARK: - Save
@@ -162,9 +239,18 @@ final class RecordingStore {
         )
         do {
             let data = try Self.encoder().encode(manifest)
-            try data.write(to: manifestURL, options: .atomic)
+            try AtomicFile.write(data, to: manifestURL)
         } catch {
             NSLog("[RecordingStore] Failed to save manifest: \(error)")
+        }
+
+        // Keep the synced categories master list current (skip no-op rewrites
+        // so updatedAt stays an honest last-edit marker).
+        let existing = (try? Data(contentsOf: libraryFileURL))
+            .flatMap { try? Self.decoder().decode(LibraryFile.self, from: $0) }
+        if existing?.categories != categories,
+           let data = try? Self.encoder().encode(LibraryFile(categories: categories)) {
+            try? AtomicFile.write(data, to: libraryFileURL)
         }
     }
 
@@ -177,13 +263,21 @@ final class RecordingStore {
         }
         recordings.insert(entry, at: 0)
         recordings.sort { $0.date > $1.date }
+        writeMetaIfChanged(for: entry)
         save()
         onRecordingAdded?(entry.id)
     }
 
     func update(_ id: UUID, _ mutate: (inout Recording) -> Void) {
         guard let idx = recordings.firstIndex(where: { $0.id == id }) else { return }
+        let oldMetaURL = recordings[idx].metaURL
         mutate(&recordings[idx])
+        // Compress-in-place swaps the audio extension; the meta sidecar keeps
+        // the stem, but remove a stale copy if the stem ever changed.
+        if recordings[idx].metaURL != oldMetaURL {
+            try? FileManager.default.removeItem(at: oldMetaURL)
+        }
+        writeMetaIfChanged(for: recordings[idx])
         save()
     }
 
@@ -225,6 +319,7 @@ final class RecordingStore {
         }
         for rIdx in recordings.indices where recordings[rIdx].category == old {
             recordings[rIdx].category = trimmed
+            writeMetaIfChanged(for: recordings[rIdx])
         }
         save()
     }
@@ -233,6 +328,7 @@ final class RecordingStore {
         categories.removeAll { $0 == name }
         for idx in recordings.indices where recordings[idx].category == name {
             recordings[idx].category = nil
+            writeMetaIfChanged(for: recordings[idx])
         }
         save()
     }
