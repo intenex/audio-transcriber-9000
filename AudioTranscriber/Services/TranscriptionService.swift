@@ -1,252 +1,292 @@
+import AppKit
 import Foundation
 import Observation
+import UserNotifications
 
-@Observable
+/// Queue-based transcription orchestrator. Jobs run serially through a
+/// pluggable TranscriptionEngine (local FluidAudio by default, cloud engines
+/// by choice); progress/ETA are published for the UI; jobs are pausable
+/// (checkpoint kept), cancellable (checkpoint discarded), and resumable.
+@Observable @MainActor
 final class TranscriptionService {
-    var isTranscribing = false
-    var progress: String = ""
-    var progressPercent: Double = 0
+
+    struct QueuedJob: Equatable {
+        let recordingID: UUID
+        let engineKind: TranscriptionEngineKind
+    }
+
+    private enum StopIntent { case pause, cancel }
+
+    // Published state
+    private(set) var activeRecordingID: UUID? = nil
+    private(set) var queue: [QueuedJob] = []
     var errorMessage: String? = nil
 
-    // MARK: - Public
+    // Back-compat surface used by existing views
+    var isTranscribing: Bool { activeRecordingID != nil }
+    private(set) var progress: String = ""
+    private(set) var progressPercent: Double = 0
+    private(set) var etaText: String? = nil
 
-    func transcribe(recording: inout Recording) async {
-        let hfToken = UserDefaults.standard.string(forKey: "huggingFaceToken") ?? ""
-        let model = UserDefaults.standard.string(forKey: "whisperModel") ?? "large-v3"
+    // Wiring
+    private weak var store: RecordingStore?
+    private var llmService: LLMService? = nil
+    private var speakerLibrary: SpeakerLibraryStore? = nil
 
-        guard !hfToken.isEmpty else {
-            recording.status = .failed
-            errorMessage = "HuggingFace token not set. Open Settings to configure it."
+    // Engines: local engine is retained so models stay loaded between jobs.
+    private let localEngine = LocalFluidAudioEngine()
+    /// Cloud engines are created per job via this factory (set up in app wiring).
+    var cloudEngineFactory: ((TranscriptionEngineKind) -> (any TranscriptionEngine)?)? = nil
+
+    private var workerTask: Task<Void, Never>? = nil
+    private var jobTask: Task<TranscriptionOutput, Error>? = nil
+    private var stopIntents: [UUID: StopIntent] = [:]
+    private var sleepGuard: SleepGuard? = nil
+    private var didRequestNotificationAuth = false
+
+    func attach(store: RecordingStore, llmService: LLMService?, speakerLibrary: SpeakerLibraryStore? = nil) {
+        self.store = store
+        self.llmService = llmService
+        self.speakerLibrary = speakerLibrary
+    }
+
+    /// Test hook: when set, used for every engine kind.
+    var engineOverride: (any TranscriptionEngine)? = nil
+
+    func engine(for kind: TranscriptionEngineKind) -> (any TranscriptionEngine)? {
+        if let engineOverride { return engineOverride }
+        if kind == .local { return localEngine }
+        return cloudEngineFactory?(kind)
+    }
+
+    var localFluidEngine: LocalFluidAudioEngine { localEngine }
+
+    // MARK: - Queue API
+
+    func queuePosition(of recordingID: UUID) -> Int? {
+        queue.firstIndex { $0.recordingID == recordingID }.map { $0 + 1 }
+    }
+
+    func isActive(_ recordingID: UUID) -> Bool { activeRecordingID == recordingID }
+
+    func enqueue(_ recordingID: UUID, using kind: TranscriptionEngineKind = .local) {
+        guard let store, let recording = store.recording(with: recordingID) else { return }
+        guard recording.status.canStartTranscription else { return }
+        guard !isActive(recordingID), queuePosition(of: recordingID) == nil else { return }
+
+        requestNotificationAuthIfNeeded()
+        store.update(recordingID) { $0.status = .processing }
+        queue.append(QueuedJob(recordingID: recordingID, engineKind: kind))
+        startWorkerIfNeeded()
+    }
+
+    /// Pause the active job (checkpoint kept for resume) or unqueue a waiting one.
+    func pause(_ recordingID: UUID) {
+        if isActive(recordingID) {
+            stopIntents[recordingID] = .pause
+            jobTask?.cancel()
+        } else if let idx = queue.firstIndex(where: { $0.recordingID == recordingID }) {
+            queue.remove(at: idx)
+            let status = statusForExistingCheckpoint(recordingID)
+            store?.update(recordingID) { $0.status = status }
+        }
+    }
+
+    /// Cancel entirely: discard checkpoint, back to pending.
+    func cancel(_ recordingID: UUID) {
+        if isActive(recordingID) {
+            stopIntents[recordingID] = .cancel
+            jobTask?.cancel()
+        } else if let idx = queue.firstIndex(where: { $0.recordingID == recordingID }) {
+            queue.remove(at: idx)
+            deleteCheckpoint(recordingID)
+            store?.update(recordingID) { $0.status = .pending }
+        }
+    }
+
+    private func statusForExistingCheckpoint(_ recordingID: UUID) -> TranscriptionStatus {
+        guard let recording = store?.recording(with: recordingID) else { return .pending }
+        return FileManager.default.fileExists(atPath: recording.checkpointURL.path) ? .paused : .pending
+    }
+
+    private func deleteCheckpoint(_ recordingID: UUID) {
+        guard let recording = store?.recording(with: recordingID) else { return }
+        try? FileManager.default.removeItem(at: recording.checkpointURL)
+    }
+
+    // MARK: - Worker
+
+    private func startWorkerIfNeeded() {
+        guard workerTask == nil else { return }
+        workerTask = Task { [weak self] in
+            await self?.drainQueue()
+            self?.workerTask = nil
+        }
+    }
+
+    private func drainQueue() async {
+        sleepGuard = SleepGuard(reason: "Transcribing audio")
+        defer {
+            sleepGuard = nil
+            activeRecordingID = nil
+            progress = ""
+            progressPercent = 0
+            etaText = nil
+        }
+
+        while !queue.isEmpty {
+            let job = queue.removeFirst()
+            await run(job)
+        }
+    }
+
+    private func run(_ job: QueuedJob) async {
+        guard let store, let recording = store.recording(with: job.recordingID) else { return }
+        guard let engine = engine(for: job.engineKind) else {
+            store.update(job.recordingID) { $0.status = .failed }
+            errorMessage = "\(job.engineKind.displayName) isn't configured. Add its API key in Settings."
             return
         }
 
-        await MainActor.run {
-            isTranscribing = true
-            progress = "Starting transcription..."
-            progressPercent = 0
-            recording.status = .processing
+        activeRecordingID = job.recordingID
+        progress = "Starting transcription…"
+        progressPercent = 0
+        etaText = nil
+
+        let knownSpeakers = speakerLibrary?.referenceCandidates(limit: 4) ?? []
+        let request = TranscriptionRequest(
+            recordingID: recording.id,
+            audioURL: recording.fileURL,
+            durationSeconds: recording.duration,
+            language: nil,
+            checkpointURL: recording.checkpointURL,
+            knownSpeakers: knownSpeakers
+        )
+
+        let task = Task { [weak self] () throws -> TranscriptionOutput in
+            try await engine.transcribe(request) { update in
+                Task { @MainActor [weak self] in
+                    guard let self, self.activeRecordingID == request.recordingID else { return }
+                    self.progress = update.message
+                    self.progressPercent = update.fractionComplete
+                    self.etaText = update.etaSeconds.map { ETAFormatter.string($0) }
+                }
+            }
         }
+        jobTask = task
 
         do {
-            let json = try await runPythonScript(
-                audioPath: recording.fileURL.path,
-                hfToken: hfToken,
-                model: model
-            )
-
-            let result = try parseJSON(json)
-
-            let markdownURL = recording.fileURL.deletingPathExtension().appendingPathExtension("md")
-            let markdown = MarkdownFormatter.format(result: result, recording: recording)
-            try markdown.write(to: markdownURL, atomically: true, encoding: .utf8)
-
-            // Save word-level segment data for interactive playback
-            let segmentsURL = recording.fileURL.deletingPathExtension().appendingPathExtension("segments.json")
-            if let segData = try? JSONEncoder().encode(result.segments) {
-                try? segData.write(to: segmentsURL)
-            }
-
-            await MainActor.run {
-                recording.transcriptionURL = markdownURL
-                recording.status = .done
-                isTranscribing = false
-                progress = ""
-                progressPercent = 0
-            }
-
-            // Auto-summarize if Ollama is available
-            await autoSummarize(transcript: markdown, recording: &recording)
+            let output = try await task.value
+            try finish(recording: recording, output: output)
+            stopIntents[job.recordingID] = nil
+        } catch is CancellationError {
+            handleStop(job)
         } catch {
-            await MainActor.run {
-                recording.status = .failed
+            // Engine may wrap the cancellation; honor an explicit stop intent first.
+            if stopIntents[job.recordingID] != nil {
+                handleStop(job)
+            } else {
+                store.update(job.recordingID) { $0.status = .failed }
                 errorMessage = error.localizedDescription
-                isTranscribing = false
-                progress = ""
-                progressPercent = 0
+            }
+        }
+        jobTask = nil
+        activeRecordingID = nil
+    }
+
+    private func handleStop(_ job: QueuedJob) {
+        let intent = stopIntents[job.recordingID] ?? .pause
+        stopIntents[job.recordingID] = nil
+        switch intent {
+        case .pause:
+            let status = statusForExistingCheckpoint(job.recordingID)
+            store?.update(job.recordingID) { $0.status = status }
+        case .cancel:
+            deleteCheckpoint(job.recordingID)
+            store?.update(job.recordingID) { $0.status = .pending }
+        }
+    }
+
+    private func finish(recording: Recording, output: TranscriptionOutput) throws {
+        guard let store else { return }
+
+        // Write sidecars in the existing formats.
+        let markdown = MarkdownFormatter.format(result: output.result, recording: recording)
+        try markdown.write(to: recording.markdownURL, atomically: true, encoding: .utf8)
+        if let segmentData = try? JSONEncoder().encode(output.result.segments) {
+            try? segmentData.write(to: recording.segmentsURL)
+        }
+
+        // Merge auto-identified speaker names, never overwriting user-set names.
+        if !output.speakerNames.isEmpty {
+            var names = (try? Data(contentsOf: recording.speakersURL))
+                .flatMap { try? JSONDecoder().decode([String: String].self, from: $0) } ?? [:]
+            for (id, name) in output.speakerNames where names[id] == nil {
+                names[id] = name
+            }
+            if let data = try? JSONEncoder().encode(names) {
+                try? data.write(to: recording.speakersURL)
+            }
+        }
+
+        // Let the speaker library match/annotate (voice enrollment, local engine).
+        speakerLibrary?.handleTranscriptionCompleted(
+            recording: recording, output: output)
+
+        try? FileManager.default.removeItem(at: recording.checkpointURL)
+
+        store.update(recording.id) {
+            $0.transcriptionURL = recording.markdownURL
+            $0.status = .done
+        }
+
+        notifyCompletion(recording: recording)
+
+        // Fire-and-forget auto-summarize.
+        if UserDefaults.standard.object(forKey: "autoSummarize") as? Bool ?? true {
+            Task { [weak self] in
+                await self?.autoSummarize(markdown: markdown, recordingID: recording.id)
             }
         }
     }
 
-    // MARK: - Auto Summarization
-
-    private func autoSummarize(transcript: String, recording: inout Recording) async {
-        let llm = LLMService()
-        await llm.checkAvailability()
-        guard llm.isAvailable else { return }
-
-        await MainActor.run { progress = "Generating summary..." }
+    private func autoSummarize(markdown: String, recordingID: UUID) async {
+        guard let llmService else { return }
+        if !llmService.isAvailable {
+            await llmService.checkAvailability()
+        }
+        guard llmService.isAvailable, let store, let recording = store.recording(with: recordingID) else { return }
 
         do {
-            let summary = try await SummarizationService.summarize(transcript: transcript, llm: llm)
+            let summary = try await SummarizationService.summarize(transcript: markdown, llm: llmService)
             SummarizationService.saveSummary(summary, for: recording)
-
-            // Auto-name if no name set
-            if recording.name == nil {
-                await MainActor.run {
-                    recording.name = summary.generatedName
-                }
+            if store.recording(with: recordingID)?.name == nil {
+                store.update(recordingID) { $0.name = summary.generatedName }
             }
         } catch {
-            // Non-fatal: summarization failure shouldn't affect transcription success
+            // Non-fatal: summarization failure shouldn't affect transcription success.
         }
     }
 
-    // MARK: - Private
+    // MARK: - Notifications
 
-    private func runPythonScript(audioPath: String, hfToken: String, model: String) async throws -> String {
-        let scriptPath = resolveScriptPath()
-
-        let process = Process()
-        let stdout = Pipe()
-        let stderr = Pipe()
-
-        let condaPath = resolveCondaPath()
-        process.executableURL = URL(fileURLWithPath: condaPath)
-        process.arguments = [
-            "run", "-n", "transcriber", "--no-capture-output",
-            "python", scriptPath,
-            audioPath, hfToken,
-            "--model", model,
-        ]
-        process.standardOutput = stdout
-        process.standardError = stderr
-
-        // Read stderr asynchronously for progress updates
-        var stderrAccumulator = ""
-        let stderrHandle = stderr.fileHandleForReading
-        stderrHandle.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty, let line = String(data: data, encoding: .utf8) else { return }
-            stderrAccumulator += line
-
-            // Parse PROGRESS lines
-            for part in line.components(separatedBy: "\n") {
-                if part.hasPrefix("PROGRESS:") {
-                    let components = part.dropFirst("PROGRESS:".count).components(separatedBy: ":")
-                    if components.count >= 2,
-                       let percent = Double(components[0]) {
-                        let message = components.dropFirst().joined(separator: ":")
-                        Task { @MainActor [weak self] in
-                            self?.progressPercent = percent / 100.0
-                            self?.progress = message
-                        }
-                    }
-                }
-            }
-        }
-
-        return try await withCheckedThrowingContinuation { continuation in
-            process.terminationHandler = { proc in
-                stderrHandle.readabilityHandler = nil
-                let outData = stdout.fileHandleForReading.readDataToEndOfFile()
-                let output = String(data: outData, encoding: .utf8) ?? ""
-
-                if proc.terminationStatus == 0 {
-                    continuation.resume(returning: output.trimmingCharacters(in: .whitespacesAndNewlines))
-                } else {
-                    let msg = stderrAccumulator.isEmpty ? "Transcription process failed (exit \(proc.terminationStatus))" : stderrAccumulator
-                    continuation.resume(throwing: TranscriptionError.processFailed(msg))
-                }
-            }
-
-            do {
-                try process.run()
-            } catch {
-                continuation.resume(throwing: error)
-            }
-        }
+    private var isRunningTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
     }
 
-    private func parseJSON(_ json: String) throws -> TranscriptionResult {
-        // Extract JSON from output — log lines may leak to stdout before the JSON
-        let lines = json.components(separatedBy: "\n")
-        let jsonString = lines.last(where: { $0.hasPrefix("{") }) ?? json
-
-        guard let data = jsonString.data(using: .utf8) else {
-            throw TranscriptionError.invalidOutput("Could not convert output to data")
-        }
-
-        // Check for error key first
-        if let errorDict = try? JSONDecoder().decode([String: String].self, from: data),
-           let errorMsg = errorDict["error"] {
-            throw TranscriptionError.scriptError(errorMsg)
-        }
-
-        do {
-            return try JSONDecoder().decode(TranscriptionResult.self, from: data)
-        } catch {
-            throw TranscriptionError.invalidOutput("JSON parse error: \(error.localizedDescription)\nRaw: \(json.prefix(500))")
-        }
+    private func requestNotificationAuthIfNeeded() {
+        guard !didRequestNotificationAuth, !isRunningTests else { return }
+        didRequestNotificationAuth = true
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
-    private func resolveCondaPath() -> String {
-        // Check common conda locations
-        let candidates = [
-            NSHomeDirectory() + "/miniconda3/condabin/conda",
-            NSHomeDirectory() + "/anaconda3/condabin/conda",
-            NSHomeDirectory() + "/miniforge3/condabin/conda",
-            "/opt/homebrew/Caskroom/miniconda/base/condabin/conda",
-            "/usr/local/Caskroom/miniconda/base/condabin/conda",
-        ]
-        for path in candidates {
-            if FileManager.default.fileExists(atPath: path) {
-                return path
-            }
-        }
-        // Fallback to PATH (works in terminal but not from Xcode)
-        return "/usr/bin/env"
-    }
-
-    private func resolveScriptPath() -> String {
-        let fm = FileManager.default
-
-        // 1. Check in app bundle resources
-        if let bundlePath = Bundle.main.resourcePath {
-            let candidate = (bundlePath as NSString).appendingPathComponent("scripts/transcribe.py")
-            if fm.fileExists(atPath: candidate) { return candidate }
-        }
-
-        // 2. Check relative to current working directory
-        let cwdCandidate = fm.currentDirectoryPath + "/scripts/transcribe.py"
-        if fm.fileExists(atPath: cwdCandidate) { return cwdCandidate }
-
-        // 3. Check next to the app bundle (for archived/exported apps)
-        let appDir = Bundle.main.bundleURL.deletingLastPathComponent().path
-        let appDirCandidate = appDir + "/scripts/transcribe.py"
-        if fm.fileExists(atPath: appDirCandidate) { return appDirCandidate }
-
-        // 4. Walk up from app bundle to find the source project directory
-        //    (handles DerivedData builds: .../Build/Products/Debug/App.app)
-        var dir = Bundle.main.bundleURL.deletingLastPathComponent()
-        for _ in 0..<10 {
-            let candidate = dir.appendingPathComponent("scripts/transcribe.py").path
-            if fm.fileExists(atPath: candidate) { return candidate }
-            let parent = dir.deletingLastPathComponent()
-            if parent.path == dir.path { break }
-            dir = parent
-        }
-
-        // 5. Known project source path (development fallback)
-        let knownPath = NSHomeDirectory() + "/Dropbox/code/audio-transcriber/scripts/transcribe.py"
-        if fm.fileExists(atPath: knownPath) { return knownPath }
-
-        // Last resort
-        return appDir + "/scripts/transcribe.py"
-    }
-}
-
-// MARK: - Errors
-
-enum TranscriptionError: LocalizedError {
-    case processFailed(String)
-    case invalidOutput(String)
-    case scriptError(String)
-
-    var errorDescription: String? {
-        switch self {
-        case .processFailed(let msg): return "Process failed: \(msg)"
-        case .invalidOutput(let msg): return "Invalid output: \(msg)"
-        case .scriptError(let msg): return "Script error: \(msg)"
-        }
+    private func notifyCompletion(recording: Recording) {
+        guard !isRunningTests, !NSApp.isActive else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Transcription complete"
+        content.body = recording.displayName
+        content.sound = .default
+        let request = UNNotificationRequest(identifier: recording.id.uuidString, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request) { _ in }
     }
 }

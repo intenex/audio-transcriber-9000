@@ -10,14 +10,26 @@ actor LocalFluidAudioEngine: TranscriptionEngine {
 
     static let diarizerCalibrationID = "local.fluidaudio.offline-diarizer"
 
+    /// Cluster-merge threshold (higher = more merging = fewer speakers).
+    /// 0.85 validated against the repo's 2-speaker phone-call fixture — the
+    /// library default of 0.7 over-splits real-world recordings into 4+.
+    static let defaultClusteringThreshold: Float = 0.85
+
+    static var configuredClusteringThreshold: Float {
+        let value = UserDefaults.standard.float(forKey: "diarizationClusteringThreshold")
+        return value > 0 ? value : defaultClusteringThreshold
+    }
+
     private var asrManager: AsrManager? = nil
     private var diarizer: DiarizerManager? = nil
+    private var diarizerThreshold: Float = LocalFluidAudioEngine.defaultClusteringThreshold
     private var vadManager: VadManager? = nil
 
     // MARK: - Prepare (model download + load)
 
     func prepare(progress: @escaping @Sendable (TranscriptionProgress) -> Void) async throws {
-        if asrManager != nil, diarizer != nil { return }
+        if asrManager != nil, diarizer != nil,
+           diarizerThreshold == Self.configuredClusteringThreshold { return }
 
         let needsDownload = !AsrModels.modelsExist(at: AsrModels.defaultCacheDirectory())
         if needsDownload {
@@ -41,16 +53,20 @@ actor LocalFluidAudioEngine: TranscriptionEngine {
             asrManager = manager
         }
 
-        if diarizer == nil {
+        let threshold = Self.configuredClusteringThreshold
+        if diarizer == nil || diarizerThreshold != threshold {
             let models = try await DiarizerModels.downloadIfNeeded { dp in
                 progress(TranscriptionProgress(
                     phase: .downloadingModels,
                     fractionComplete: 0.7 + dp.fractionCompleted * 0.25,
                     message: "Downloading speaker model… \(Int(dp.fractionCompleted * 100))%"))
             }
-            let manager = DiarizerManager(config: DiarizerConfig())
+            var config = DiarizerConfig()
+            config.clusteringThreshold = threshold
+            let manager = DiarizerManager(config: config)
             manager.initialize(models: models)
             diarizer = manager
+            diarizerThreshold = threshold
         }
 
         if vadManager == nil {

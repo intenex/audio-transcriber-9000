@@ -138,11 +138,7 @@ struct RecordingListView: View {
     }
 
     private func transcribe(_ recording: Recording) async {
-        // Temporary bridge until the queue-based TranscriptionService lands.
-        var mutable = recording
-        await transcriptionService.transcribe(recording: &mutable)
-        let result = mutable
-        store.update(result.id) { $0 = result }
+        transcriptionService.enqueue(recording.id)
     }
 }
 
@@ -163,8 +159,11 @@ struct RecordingRow: View {
     }
 
     private var progressLabel: String {
-        let pct = Int(transcriptionService.progressPercent * 100)
-        return pct > 0 ? "\(pct)%" : "Processing"
+        if transcriptionService.isActive(recording.id) {
+            let pct = Int(transcriptionService.progressPercent * 100)
+            return pct > 0 ? "\(pct)%" : "Processing"
+        }
+        return "Queued"
     }
 
     var body: some View {

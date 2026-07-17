@@ -340,7 +340,19 @@ struct TranscriptionView: View {
         }
     }
 
+    @ViewBuilder
     private var processingView: some View {
+        if transcriptionService.isActive(recording.id) {
+            activeTranscriptionView
+        } else if let position = transcriptionService.queuePosition(of: recording.id) {
+            queuedView(position: position)
+        } else {
+            // Status says processing but no job — stale state (repaired on next launch)
+            activeTranscriptionView
+        }
+    }
+
+    private var activeTranscriptionView: some View {
         VStack(spacing: 20) {
             ZStack {
                 Circle()
@@ -366,9 +378,50 @@ struct TranscriptionView: View {
                     .foregroundStyle(.tertiary)
             }
 
-            Text("This may take a few minutes for longer recordings")
+            Text(transcriptionService.etaText ?? "Estimating time remaining…")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+                .contentTransition(.numericText())
+
+            HStack(spacing: 12) {
+                Button(action: { transcriptionService.pause(recording.id) }) {
+                    Label("Pause", systemImage: "pause.fill")
+                        .font(.subheadline.weight(.medium))
+                }
+                .buttonStyle(.bordered)
+                .help("Pause — progress is saved and you can resume later")
+
+                Button(role: .destructive, action: { transcriptionService.cancel(recording.id) }) {
+                    Label("Cancel", systemImage: "xmark")
+                        .font(.subheadline.weight(.medium))
+                }
+                .buttonStyle(.bordered)
+                .help("Cancel and discard progress")
+            }
+        }
+    }
+
+    private func queuedView(position: Int) -> some View {
+        VStack(spacing: 20) {
+            ZStack {
+                Circle()
+                    .fill(AppTheme.processing.opacity(0.08))
+                    .frame(width: 100, height: 100)
+                Image(systemName: "list.number")
+                    .font(.system(size: 36, weight: .light))
+                    .foregroundStyle(AppTheme.processing)
+            }
+            Text("Waiting in queue")
+                .font(.title3.weight(.medium))
+                .foregroundStyle(.secondary)
+            Text("Position \(position) — will start automatically")
                 .font(.subheadline)
                 .foregroundStyle(.tertiary)
+            Button(role: .destructive, action: { transcriptionService.cancel(recording.id) }) {
+                Label("Remove from Queue", systemImage: "xmark")
+                    .font(.subheadline.weight(.medium))
+            }
+            .buttonStyle(.bordered)
         }
     }
 
@@ -813,13 +866,7 @@ struct TranscriptionView: View {
     }
 
     private func transcribeRecording() async {
-        // Temporary bridge until the queue-based TranscriptionService lands.
-        // Update status immediately so processingView shows before async work starts.
-        store.update(recording.id) { $0.status = .processing }
-        guard var mutable = store.recording(with: recording.id) else { return }
-        await transcriptionService.transcribe(recording: &mutable)
-        let result = mutable
-        store.update(result.id) { $0 = result }
+        transcriptionService.enqueue(recording.id)
     }
 
     private func copyToClipboard(_ text: String) {

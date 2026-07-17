@@ -133,11 +133,14 @@ final class TranscriptionServiceTests: XCTestCase {
 
     // MARK: - TranscriptionService Initial State
 
+    @MainActor
     func testServiceInitialState() {
         let service = TranscriptionService()
         XCTAssertFalse(service.isTranscribing)
         XCTAssertTrue(service.progress.isEmpty)
         XCTAssertNil(service.errorMessage)
+        XCTAssertTrue(service.queue.isEmpty)
+        XCTAssertNil(service.activeRecordingID)
     }
 
     // MARK: - Helpers
