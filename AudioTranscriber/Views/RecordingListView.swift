@@ -56,8 +56,18 @@ struct RecordingListView: View {
                                     Label("Play", systemImage: "play.fill")
                                 }
 
-                                Button {
-                                    Task { await transcribe(recording) }
+                                Menu {
+                                    Button("On-Device (Local)") {
+                                        transcriptionService.enqueue(recording.id, using: .local)
+                                    }
+                                    Button("OpenAI") {
+                                        transcriptionService.enqueue(recording.id, using: .openAI)
+                                    }
+                                    .disabled(!KeychainStore.shared.has(.openAI))
+                                    Button("AssemblyAI") {
+                                        transcriptionService.enqueue(recording.id, using: .assemblyAI)
+                                    }
+                                    .disabled(!KeychainStore.shared.has(.assemblyAI))
                                 } label: {
                                     Label(recording.status.isResumable ? "Resume Transcription" : "Transcribe",
                                           systemImage: "waveform.badge.mic")
@@ -137,9 +147,6 @@ struct RecordingListView: View {
         }
     }
 
-    private func transcribe(_ recording: Recording) async {
-        transcriptionService.enqueue(recording.id)
-    }
 }
 
 // Make UUID conform to Identifiable for .sheet(item:)

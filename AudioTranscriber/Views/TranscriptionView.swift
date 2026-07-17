@@ -28,6 +28,9 @@ struct TranscriptionView: View {
     @State private var speakerNames: [String: String] = [:]
     @State private var editingSpeakerID: String? = nil
     @State private var editingSpeakerName: String = ""
+    @State private var cloudConfirmKind: TranscriptionEngineKind? = nil
+    @AppStorage("defaultTranscriptionEngine") private var defaultEngineRaw = TranscriptionEngineKind.local.rawValue
+    @AppStorage("confirmCloudTranscription") private var confirmCloud = true
 
     private var isPlayingThis: Bool {
         audioRecorder.isPlaying && audioRecorder.playingRecordingID == recording.id
@@ -88,6 +91,11 @@ struct TranscriptionView: View {
         .onAppear { loadMarkdown() }
         .onChange(of: recording.status) { _, _ in loadMarkdown() }
         .onChange(of: recording.transcriptionURL) { _, _ in loadMarkdown() }
+        .sheet(item: $cloudConfirmKind) { kind in
+            CloudTranscribeConfirmSheet(recording: recording, engineKind: kind) {
+                transcriptionService.enqueue(recording.id, using: kind)
+            }
+        }
         .alert("Delete Recording?", isPresented: $showingDeleteConfirm) {
             Button("Delete", role: .destructive) {
                 audioRecorder.stopPlayback()
@@ -255,14 +263,7 @@ struct TranscriptionView: View {
             }
 
             if recording.status.canStartTranscription {
-                Button(action: { Task { await transcribeRecording() } }) {
-                    Label(recording.status.isResumable ? "Resume" : "Transcribe",
-                          systemImage: "waveform.badge.mic")
-                        .font(.subheadline.weight(.semibold))
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(AppTheme.accent)
-                .disabled(transcriptionService.isTranscribing)
+                transcribeMenu(compact: true)
             }
 
             // Always show audio export even without transcription
@@ -324,19 +325,85 @@ struct TranscriptionView: View {
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 300)
-            Button(action: { Task { await transcribeRecording() } }) {
+            Menu {
+                transcribeMenuItems
+            } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "waveform.badge.mic")
                     Text(recording.status.isResumable ? "Resume Transcription" : "Transcribe Now")
                 }
                 .font(.body.weight(.semibold))
-                .frame(width: 180, height: 40)
+                .frame(width: 200, height: 40)
                 .background(AppTheme.heroGradient)
                 .foregroundStyle(.white)
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            } primaryAction: {
+                startTranscription(using: defaultEngineKind)
             }
+            .menuStyle(.button)
             .buttonStyle(.plain)
-            .disabled(transcriptionService.isTranscribing)
+            .fixedSize()
+
+            Text("Using \(defaultEngineKind.displayName) — hold for other engines")
+                .font(.caption)
+                .foregroundStyle(.quaternary)
+        }
+    }
+
+    // MARK: - Engine selection
+
+    private var defaultEngineKind: TranscriptionEngineKind {
+        TranscriptionEngineKind(rawValue: defaultEngineRaw) ?? .local
+    }
+
+    private func isEngineConfigured(_ kind: TranscriptionEngineKind) -> Bool {
+        switch kind {
+        case .local: return true
+        case .openAI: return KeychainStore.shared.has(.openAI)
+        case .assemblyAI: return KeychainStore.shared.has(.assemblyAI)
+        }
+    }
+
+    @ViewBuilder
+    private var transcribeMenuItems: some View {
+        ForEach(TranscriptionEngineKind.allCases) { kind in
+            Button {
+                startTranscription(using: kind)
+            } label: {
+                if kind.isCloud, let cost = TranscriptionCostEstimator.estimateString(duration: recording.duration, kind: kind) {
+                    Text("\(kind.displayName)  (\(cost))")
+                } else {
+                    Text(kind.displayName)
+                }
+            }
+            .disabled(!isEngineConfigured(kind))
+        }
+        if TranscriptionEngineKind.allCases.contains(where: { $0.isCloud && !isEngineConfigured($0) }) {
+            Divider()
+            Text("Add API keys in Settings → Transcription to enable cloud engines")
+        }
+    }
+
+    private func transcribeMenu(compact: Bool) -> some View {
+        Menu {
+            transcribeMenuItems
+        } label: {
+            Label(recording.status.isResumable ? "Resume" : "Transcribe",
+                  systemImage: "waveform.badge.mic")
+                .font(.subheadline.weight(.semibold))
+        } primaryAction: {
+            startTranscription(using: defaultEngineKind)
+        }
+        .menuStyle(.button)
+        .fixedSize()
+    }
+
+    private func startTranscription(using kind: TranscriptionEngineKind) {
+        guard isEngineConfigured(kind) else { return }
+        if kind.isCloud && confirmCloud {
+            cloudConfirmKind = kind
+        } else {
+            transcriptionService.enqueue(recording.id, using: kind)
         }
     }
 
@@ -437,7 +504,7 @@ struct TranscriptionView: View {
             }
             Text("Transcription failed")
                 .font(.title3.weight(.medium))
-            Button(action: { Task { await transcribeRecording() } }) {
+            Button(action: { startTranscription(using: defaultEngineKind) }) {
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.counterclockwise")
                     Text("Retry")
@@ -864,10 +931,6 @@ struct TranscriptionView: View {
             searchStart = range.upperBound
         }
         return attributed
-    }
-
-    private func transcribeRecording() async {
-        transcriptionService.enqueue(recording.id)
     }
 
     private func copyToClipboard(_ text: String) {

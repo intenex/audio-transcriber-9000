@@ -24,6 +24,13 @@ struct AudioTranscriberApp: App {
                     audioRecorder.attach(store: recordingStore)
                     transcriptionService.attach(store: recordingStore, chatService: chatService,
                                                 speakerLibrary: speakerLibrary)
+                    transcriptionService.cloudEngineFactory = { kind in
+                        switch kind {
+                        case .openAI: return OpenAITranscriptionEngine()
+                        case .assemblyAI: return AssemblyAITranscriptionEngine()
+                        case .local: return nil
+                        }
+                    }
                     audioRecorder.onNewRecording = { id in
                         if UserDefaults.standard.bool(forKey: "autoTranscribeNewRecordings") {
                             transcriptionService.enqueue(id)
