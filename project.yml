@@ -3,6 +3,7 @@ options:
   bundleIdPrefix: com.audiotranscriber9000
   deploymentTarget:
     macOS: "14.0"
+    iOS: "17.0"
   xcodeVersion: "16.0"
   generateEmptyDirectories: true
 
@@ -10,7 +11,7 @@ settings:
   base:
     SWIFT_VERSION: "5.9"
     MACOSX_DEPLOYMENT_TARGET: "14.0"
-    PRODUCT_BUNDLE_IDENTIFIER: com.audiortranscriber.AudioTranscriber
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     DEVELOPMENT_TEAM: ""
     CODE_SIGN_STYLE: Automatic
 
@@ -24,13 +25,20 @@ targets:
     type: application
     platform: macOS
     sources:
-      - AudioTranscriber
+      # Shared code + Mac-only UI; the other platform's UI and plists are
+      # excluded (a stray Info-iOS.plist would be bundled as a resource).
+      - path: AudioTranscriber
+        excludes:
+          - "App/iOS/**"
+          - "Views/iOS/**"
+          - "Info*.plist"
     dependencies:
       - package: FluidAudio
     settings:
       base:
         PRODUCT_NAME: "Audio Transcriber 9000"
         PRODUCT_MODULE_NAME: AudioTranscriber
+        PRODUCT_BUNDLE_IDENTIFIER: com.audiortranscriber.AudioTranscriber
         INFOPLIST_FILE: AudioTranscriber/Info.plist
         CODE_SIGN_ENTITLEMENTS: AudioTranscriber/AudioTranscriber.entitlements
         ENABLE_HARDENED_RUNTIME: YES
@@ -43,6 +51,37 @@ targets:
         NSMicrophoneUsageDescription: "Audio Transcriber 9000 needs microphone access to record audio for transcription."
         NSPrincipalClass: NSApplication
         CFBundleDisplayName: "Audio Transcriber 9000"
+
+  AudioTranscriber9000iOS:
+    type: application
+    platform: iOS
+    sources:
+      - path: AudioTranscriber
+        excludes:
+          - "App/Mac/**"
+          - "Views/Mac/**"
+          - "Info*.plist"
+    dependencies:
+      - package: FluidAudio
+    settings:
+      base:
+        PRODUCT_NAME: "Audio Transcriber 9000"
+        PRODUCT_MODULE_NAME: AudioTranscriber
+        PRODUCT_BUNDLE_IDENTIFIER: com.audiortranscriber.AudioTranscriber.ios
+        INFOPLIST_FILE: AudioTranscriber/Info-iOS.plist
+        CODE_SIGN_ENTITLEMENTS: AudioTranscriber/AudioTranscriber-iOS.entitlements
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_EMIT_LOC_STRINGS: YES
+    info:
+      path: AudioTranscriber/Info-iOS.plist
+      properties:
+        NSMicrophoneUsageDescription: "Audio Transcriber 9000 needs microphone access to record audio for transcription."
+        CFBundleDisplayName: "AT-9000"
+        UILaunchScreen: {}
+        UIBackgroundModes: [audio]
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
 
   AudioTranscriberTests:
     type: bundle.unit-test
@@ -58,6 +97,22 @@ targets:
         BUNDLE_LOADER: "$(TEST_HOST)"
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Audio Transcriber 9000.app/Contents/MacOS/Audio Transcriber 9000"
 
+  AudioTranscriberTestsiOS:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      # The SAME test sources as the Mac target — everything that isn't
+      # #if os(macOS)-guarded runs on the simulator too.
+      - Tests/AudioTranscriberTests
+    dependencies:
+      - target: AudioTranscriber9000iOS
+    settings:
+      base:
+        PRODUCT_NAME: AudioTranscriberTestsiOS
+        GENERATE_INFOPLIST_FILE: YES
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Audio Transcriber 9000.app/Audio Transcriber 9000"
+
 schemes:
   AudioTranscriber9000:
     build:
@@ -69,3 +124,13 @@ schemes:
       config: Debug
       targets:
         - AudioTranscriberTests
+  AudioTranscriber9000iOS:
+    build:
+      targets:
+        AudioTranscriber9000iOS: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - AudioTranscriberTestsiOS
