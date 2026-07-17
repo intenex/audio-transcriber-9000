@@ -251,47 +251,8 @@ struct TranscriptionView: View {
         rate == rate.rounded() ? "\(Int(rate))×" : String(format: "%.2g×", rate)
     }
 
-    @ViewBuilder
     private var statusPill: some View {
-        switch recording.status {
-        case .done:
-            Text("Transcribed")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(AppTheme.success)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 2)
-                .background(AppTheme.success.opacity(0.12), in: Capsule())
-        case .processing:
-            Text("Processing...")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(AppTheme.processing)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 2)
-                .background(AppTheme.processing.opacity(0.12), in: Capsule())
-        case .failed:
-            Text("Failed")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(AppTheme.recording)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 2)
-                .background(AppTheme.recording.opacity(0.12), in: Capsule())
-        case .paused:
-            Text("Paused")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(AppTheme.warning)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 2)
-                .background(AppTheme.warning.opacity(0.12), in: Capsule())
-        case .partial:
-            Text("Partially transcribed")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(AppTheme.warning)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 2)
-                .background(AppTheme.warning.opacity(0.12), in: Capsule())
-        case .pending:
-            EmptyView()
-        }
+        StatusPill(status: recording.status)
     }
 
     @ViewBuilder
@@ -395,48 +356,9 @@ struct TranscriptionView: View {
     // MARK: - State Views
 
     private var pendingView: some View {
-        VStack(spacing: 20) {
-            ZStack {
-                Circle()
-                    .fill(AppTheme.accent.opacity(0.08))
-                    .frame(width: 100, height: 100)
-                Image(systemName: recording.status.isResumable ? "arrow.trianglehead.clockwise.rotate.90" : "text.magnifyingglass")
-                    .font(.system(size: 40, weight: .light))
-                    .foregroundStyle(AppTheme.accent.opacity(0.6))
-            }
-            Text(recording.status.isResumable ? "Transcription in progress — paused" : "Ready to transcribe")
-                .font(.title3.weight(.medium))
-                .foregroundStyle(.secondary)
-            Text(recording.status.isResumable
-                 ? "Partial progress is saved. Resume to continue where it left off."
-                 : "Click Transcribe to convert speech to text with speaker detection")
-                .font(.subheadline)
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 300)
-            Menu {
-                transcribeMenuItems
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "waveform.badge.mic")
-                    Text(recording.status.isResumable ? "Resume Transcription" : "Transcribe Now")
-                }
-                .font(.body.weight(.semibold))
-                .frame(width: 200, height: 40)
-                .background(AppTheme.heroGradient)
-                .foregroundStyle(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            } primaryAction: {
-                startTranscription(using: defaultEngineKind)
-            }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .fixedSize()
-
-            Text("Using \(defaultEngineKind.displayName) — hold for other engines")
-                .font(.caption)
-                .foregroundStyle(.quaternary)
-        }
+        PendingTranscriptionView(recording: recording,
+                                 defaultEngine: defaultEngineKind,
+                                 onStart: startTranscription)
     }
 
     // MARK: - Engine selection
@@ -445,37 +367,9 @@ struct TranscriptionView: View {
         TranscriptionEngineKind(rawValue: defaultEngineRaw) ?? .local
     }
 
-    private func isEngineConfigured(_ kind: TranscriptionEngineKind) -> Bool {
-        switch kind {
-        case .local: return true
-        case .openAI: return KeychainStore.shared.has(.openAI)
-        case .assemblyAI: return KeychainStore.shared.has(.assemblyAI)
-        }
-    }
-
-    @ViewBuilder
-    private var transcribeMenuItems: some View {
-        ForEach(TranscriptionEngineKind.allCases) { kind in
-            Button {
-                startTranscription(using: kind)
-            } label: {
-                if kind.isCloud, let cost = TranscriptionCostEstimator.estimateString(duration: recording.duration, kind: kind) {
-                    Text("\(kind.displayName)  (\(cost))")
-                } else {
-                    Text(kind.displayName)
-                }
-            }
-            .disabled(!isEngineConfigured(kind))
-        }
-        if TranscriptionEngineKind.allCases.contains(where: { $0.isCloud && !isEngineConfigured($0) }) {
-            Divider()
-            Text("Add API keys in Settings → Transcription to enable cloud engines")
-        }
-    }
-
     private func transcribeMenu(compact: Bool) -> some View {
         Menu {
-            transcribeMenuItems
+            TranscribeEngineMenuItems(recording: recording, onSelect: startTranscription)
         } label: {
             Label(recording.status.isResumable ? "Resume" : "Transcribe",
                   systemImage: "waveform.badge.mic")
@@ -488,7 +382,7 @@ struct TranscriptionView: View {
     }
 
     private func startTranscription(using kind: TranscriptionEngineKind) {
-        guard isEngineConfigured(kind) else { return }
+        guard TranscribeEngineHelper.isConfigured(kind) else { return }
         if kind.isCloud && confirmCloud {
             cloudConfirmKind = kind
         } else {
@@ -499,113 +393,17 @@ struct TranscriptionView: View {
     @ViewBuilder
     private var processingView: some View {
         if transcriptionService.isActive(recording.id) {
-            activeTranscriptionView
+            ActiveTranscriptionView(recordingID: recording.id)
         } else if let position = transcriptionService.queuePosition(of: recording.id) {
-            queuedView(position: position)
+            QueuedTranscriptionView(recordingID: recording.id, position: position)
         } else {
             // Status says processing but no job — stale state (repaired on next launch)
-            activeTranscriptionView
-        }
-    }
-
-    private var activeTranscriptionView: some View {
-        VStack(spacing: 20) {
-            ZStack {
-                Circle()
-                    .fill(AppTheme.processing.opacity(0.08))
-                    .frame(width: 100, height: 100)
-                ProgressView()
-                    .scaleEffect(1.5)
-                    .tint(AppTheme.processing)
-            }
-            Text(transcriptionService.progress.isEmpty ? "Transcribing..." : transcriptionService.progress)
-                .font(.title3.weight(.medium))
-                .foregroundStyle(.secondary)
-
-            // Progress bar
-            VStack(spacing: 8) {
-                ProgressView(value: transcriptionService.progressPercent)
-                    .progressViewStyle(.linear)
-                    .tint(AppTheme.processing)
-                    .frame(maxWidth: 300)
-
-                Text("\(Int(transcriptionService.progressPercent * 100))%")
-                    .font(.caption.weight(.medium).monospacedDigit())
-                    .foregroundStyle(.tertiary)
-            }
-
-            Text(transcriptionService.etaText ?? "Estimating time remaining…")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
-                .contentTransition(.numericText())
-
-            HStack(spacing: 12) {
-                Button(action: { transcriptionService.pause(recording.id) }) {
-                    Label("Pause", systemImage: "pause.fill")
-                        .font(.subheadline.weight(.medium))
-                }
-                .buttonStyle(.bordered)
-                .help("Pause — progress is saved and you can resume later")
-
-                Button(role: .destructive, action: { transcriptionService.cancel(recording.id) }) {
-                    Label("Cancel", systemImage: "xmark")
-                        .font(.subheadline.weight(.medium))
-                }
-                .buttonStyle(.bordered)
-                .help("Cancel and discard progress")
-            }
-        }
-    }
-
-    private func queuedView(position: Int) -> some View {
-        VStack(spacing: 20) {
-            ZStack {
-                Circle()
-                    .fill(AppTheme.processing.opacity(0.08))
-                    .frame(width: 100, height: 100)
-                Image(systemName: "list.number")
-                    .font(.system(size: 36, weight: .light))
-                    .foregroundStyle(AppTheme.processing)
-            }
-            Text("Waiting in queue")
-                .font(.title3.weight(.medium))
-                .foregroundStyle(.secondary)
-            Text("Position \(position) — will start automatically")
-                .font(.subheadline)
-                .foregroundStyle(.tertiary)
-            Button(role: .destructive, action: { transcriptionService.cancel(recording.id) }) {
-                Label("Remove from Queue", systemImage: "xmark")
-                    .font(.subheadline.weight(.medium))
-            }
-            .buttonStyle(.bordered)
+            ActiveTranscriptionView(recordingID: recording.id)
         }
     }
 
     private var failedView: some View {
-        VStack(spacing: 20) {
-            ZStack {
-                Circle()
-                    .fill(AppTheme.warning.opacity(0.1))
-                    .frame(width: 100, height: 100)
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 40))
-                    .foregroundStyle(AppTheme.warning)
-            }
-            Text("Transcription failed")
-                .font(.title3.weight(.medium))
-            Button(action: { startTranscription(using: defaultEngineKind) }) {
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.counterclockwise")
-                    Text("Retry")
-                }
-                .font(.body.weight(.semibold))
-                .frame(width: 140, height: 40)
-                .background(AppTheme.heroGradient)
-                .foregroundStyle(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            }
-            .buttonStyle(.plain)
-        }
+        FailedTranscriptionView(onRetry: { startTranscription(using: defaultEngineKind) })
     }
 
     private func interactiveTranscriptContent(_ segs: [TranscriptionSegment]) -> some View {
@@ -634,8 +432,20 @@ struct TranscriptionView: View {
             Divider()
 
             // Speaker rename pills
-            if !uniqueSpeakers(in: segs).isEmpty {
-                speakerPillsBar(speakers: uniqueSpeakers(in: segs))
+            let speakers = SpeakerPillsBar.uniqueSpeakers(in: segs)
+            if !speakers.isEmpty {
+                SpeakerPillsBar(speakers: speakers,
+                                speakerNames: $speakerNames,
+                                editingSpeakerID: $editingSpeakerID,
+                                editingSpeakerName: $editingSpeakerName,
+                                rememberVoice: $rememberVoice,
+                                isEnrolling: isEnrollingVoice,
+                                onSave: { saveSpeakerName(speakerID: $0) },
+                                onReset: { speakerID in
+                                    speakerNames.removeValue(forKey: speakerID)
+                                    editingSpeakerID = nil
+                                    saveSpeakerNames()
+                                })
                 Divider()
             }
 
@@ -651,94 +461,6 @@ struct TranscriptionView: View {
                 searchQuery: transcriptSearchQuery
             )
         }
-    }
-
-    private func speakerPillsBar(speakers: [(id: String, num: Int)]) -> some View {
-        HStack(spacing: 8) {
-            Text("Speakers:")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            ForEach(speakers, id: \.id) { speaker in
-                let displayName = speakerNames[speaker.id] ?? "Speaker \(speaker.num)"
-                Button(action: {
-                    editingSpeakerID = speaker.id
-                    editingSpeakerName = speakerNames[speaker.id] ?? ""
-                }) {
-                    HStack(spacing: 4) {
-                        Text(displayName)
-                            .font(.caption.weight(.medium))
-                        Image(systemName: "pencil")
-                            .font(.system(size: 9))
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(AppTheme.accent.opacity(0.1), in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .popover(isPresented: Binding(
-                    get: { editingSpeakerID == speaker.id },
-                    set: { if !$0 { editingSpeakerID = nil } }
-                )) {
-                    VStack(spacing: 8) {
-                        Text("Rename Speaker \(speaker.num)")
-                            .font(.headline)
-                        TextField("Name", text: $editingSpeakerName)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 200)
-                            .onSubmit {
-                                saveSpeakerName(speakerID: speaker.id)
-                            }
-                        Toggle("Remember this voice", isOn: $rememberVoice)
-                            .font(.caption)
-                            .help("Save a voice sample so this person is recognized automatically in future transcripts")
-                        if isEnrollingVoice {
-                            HStack(spacing: 6) {
-                                ProgressView().scaleEffect(0.5)
-                                Text("Saving voice sample…")
-                                    .font(.caption)
-                                    .foregroundStyle(.tertiary)
-                            }
-                        }
-                        HStack {
-                            if speakerNames[speaker.id] != nil {
-                                Button("Reset") {
-                                    speakerNames.removeValue(forKey: speaker.id)
-                                    editingSpeakerID = nil
-                                    saveSpeakerNames()
-                                }
-                                .buttonStyle(.bordered)
-                            }
-                            Spacer()
-                            Button("Cancel") { editingSpeakerID = nil }
-                                .buttonStyle(.bordered)
-                            Button("Save") {
-                                saveSpeakerName(speakerID: speaker.id)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(AppTheme.accent)
-                        }
-                    }
-                    .padding()
-                    .frame(width: 260)
-                }
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 6)
-        .background(.bar)
-    }
-
-    private func uniqueSpeakers(in segs: [TranscriptionSegment]) -> [(id: String, num: Int)] {
-        var order: [(id: String, num: Int)] = []
-        var seen: Set<String> = []
-        for seg in segs {
-            if !seen.contains(seg.speaker) {
-                seen.insert(seg.speaker)
-                order.append((id: seg.speaker, num: order.count + 1))
-            }
-        }
-        return order
     }
 
     private func countMatchesInSegments(_ segs: [TranscriptionSegment], query: String) -> Int {
@@ -775,60 +497,14 @@ struct TranscriptionView: View {
         // Embedding extraction needs the local speaker models; skip quietly if absent.
         guard modelManager.allReady else { return }
 
-        let candidates = ReferenceClipExtractor.selectCandidates(segments: segs, speakerID: speakerID)
-        guard !candidates.isEmpty else { return }
-
-        let audioURL = recording.fileURL
-        let recordingID = recording.id
-        let engine = transcriptionService.localFluidEngine
-        let library = speakerLibrary
-
         isEnrollingVoice = true
         Task {
             defer { isEnrollingVoice = false }
-
-            var embeddings: [[Float]] = []
-            var clips: [EnrolledSpeaker.Clip] = []
-            let speakerUUID = UUID()
-
-            for (index, candidate) in candidates.enumerated() {
-                // Read the samples once; they gate everything downstream.
-                guard let samples = try? ReferenceClipExtractor.samples16k(
-                    from: audioURL, start: candidate.start, end: candidate.end),
-                    samples.count > 16_000 else { continue }   // at least 1s
-
-                // Silence gate: never enroll clips/embeddings that are just
-                // room noise — silent references poison recognition.
-                guard ReferenceClipExtractor.isLikelySpeech(samples) else { continue }
-
-                if let embedding = try? await engine.extractEmbedding(samples: samples) {
-                    embeddings.append(embedding)
-                }
-
-                // Compressed clip for cloud known-speaker references
-                let clipDir = library.clipsDirectory.appendingPathComponent(speakerUUID.uuidString, isDirectory: true)
-                try? FileManager.default.createDirectory(at: clipDir, withIntermediateDirectories: true)
-                let clipURL = clipDir.appendingPathComponent("clip-\(index + 1).m4a")
-                let range = CMTimeRange(
-                    start: CMTime(seconds: candidate.start, preferredTimescale: 600),
-                    end: CMTime(seconds: candidate.end, preferredTimescale: 600))
-                if (try? await AudioCompressor.compress(source: audioURL, timeRange: range, to: clipURL)) != nil,
-                   // Verify the written clip actually contains the speech.
-                   let written = try? WindowedAudioLoader.load16kMono(from: clipURL),
-                   ReferenceClipExtractor.isLikelySpeech(written) {
-                    clips.append(EnrolledSpeaker.Clip(
-                        file: "clips/\(speakerUUID.uuidString)/clip-\(index + 1).m4a",
-                        duration: candidate.duration,
-                        sourceRecordingID: recordingID,
-                        start: candidate.start,
-                        end: candidate.end))
-                } else {
-                    try? FileManager.default.removeItem(at: clipURL)
-                }
-            }
-
-            guard !embeddings.isEmpty || !clips.isEmpty else { return }
-            library.enroll(name: name, embeddings: embeddings, clips: clips, recordingID: recordingID)
+            await VoiceEnrollmentAction.enroll(
+                name: name, speakerID: speakerID, segments: segs,
+                audioURL: recording.fileURL, recordingID: recording.id,
+                engine: transcriptionService.localFluidEngine,
+                library: speakerLibrary)
         }
     }
 
@@ -875,168 +551,12 @@ struct TranscriptionView: View {
 
     // MARK: - Summary Tab
 
-    @ViewBuilder
     private var summaryTabContent: some View {
-        if let summary = loadedSummary {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    // Topics tags
-                    if let topics = summary.topics, !topics.isEmpty {
-                        HStack(spacing: 6) {
-                            ForEach(topics, id: \.self) { topic in
-                                Text(topic)
-                                    .font(.caption.weight(.medium))
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 4)
-                                    .background(AppTheme.accent.opacity(0.1), in: Capsule())
-                                    .foregroundStyle(AppTheme.accent)
-                            }
-                            Spacer()
-                        }
-                    }
-
-                    // Summary section (markdown-rendered)
-                    VStack(alignment: .leading, spacing: 8) {
-                        summarySectionHeader("Summary", icon: "doc.text")
-                        Text(attributedMarkdown(summary.summary))
-                            .textSelection(.enabled)
-                            .lineSpacing(3)
-                    }
-
-                    // Key Points
-                    if let keyPoints = summary.keyPoints, !keyPoints.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            summarySectionHeader("Key Points", icon: "list.bullet")
-                            ForEach(keyPoints, id: \.self) { point in
-                                bulletRow(icon: "smallcircle.filled.circle", tint: AppTheme.accent, text: point)
-                            }
-                        }
-                    }
-
-                    // Decisions
-                    if let decisions = summary.decisions, !decisions.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            summarySectionHeader("Decisions", icon: "checkmark.seal")
-                            ForEach(decisions, id: \.self) { decision in
-                                bulletRow(icon: "checkmark.seal.fill", tint: AppTheme.success, text: decision)
-                            }
-                        }
-                    }
-
-                    // Action Items
-                    if !summary.actionItems.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            summarySectionHeader("Action Items", icon: "checklist")
-                            ForEach(summary.actionItems, id: \.self) { item in
-                                bulletRow(icon: "circle", tint: AppTheme.warning, text: item)
-                            }
-                        }
-                    }
-
-                    Divider()
-
-                    // Generated name
-                    HStack {
-                        Text("Suggested name:")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(summary.generatedName)
-                            .font(.caption.weight(.medium))
-                        if recording.name == nil {
-                            Button("Use") {
-                                store.update(recording.id) { $0.name = summary.generatedName }
-                            }
-                            .font(.caption)
-                            .buttonStyle(.bordered)
-                        }
-                    }
-
-                    // Regenerate + attribution footer
-                    HStack(spacing: 12) {
-                        if chatService.isActiveProviderReady {
-                            Button(action: { Task { await regenerateSummary() } }) {
-                                Label("Regenerate Summary", systemImage: "arrow.counterclockwise")
-                                    .font(.subheadline)
-                            }
-                            .buttonStyle(.bordered)
-                            .disabled(isRegeneratingSummary)
-                        }
-                        Text("Generated \(summary.generatedAt.formatted())\(summary.modelUsed.map { " · \($0)" } ?? "")")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-                .padding(24)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        } else if isRegeneratingSummary {
-            VStack(spacing: 12) {
-                ProgressView()
-                Text("Summarizing with \(chatService.activeProvider.modelIdentity)…")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                Text("Long recordings can take a few minutes.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-        } else if chatService.isActiveProviderReady {
-            VStack(spacing: 16) {
-                Image(systemName: "doc.text.magnifyingglass")
-                    .font(.system(size: 40))
-                    .foregroundStyle(.tertiary)
-                Text("No summary yet")
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-                if let summaryError {
-                    VStack(spacing: 6) {
-                        Label(summaryError, systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption)
-                            .foregroundStyle(AppTheme.warning)
-                            .multilineTextAlignment(.center)
-                            .frame(maxWidth: 420)
-                            .textSelection(.enabled)
-                    }
-                }
-                Button(action: { Task { await regenerateSummary() } }) {
-                    Label(summaryError == nil ? "Generate Summary" : "Try Again", systemImage: "sparkles")
-                        .font(.subheadline.weight(.semibold))
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(AppTheme.accent)
-                Text("Using \(chatService.activeProvider.modelIdentity)")
-                    .font(.caption2)
-                    .foregroundStyle(.quaternary)
-            }
-        } else {
-            VStack(spacing: 16) {
-                Image(systemName: "doc.text.magnifyingglass")
-                    .font(.system(size: 40))
-                    .foregroundStyle(.tertiary)
-                Text("Summarization requires mlx-lm")
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-                Text("Install mlx-lm in the transcriber conda environment to generate summaries.")
-                    .font(.subheadline)
-                    .foregroundStyle(.tertiary)
-            }
-        }
-    }
-
-    private func summarySectionHeader(_ title: String, icon: String) -> some View {
-        Label(title, systemImage: icon)
-            .font(.title3.weight(.semibold))
-            .labelStyle(.titleAndIcon)
-    }
-
-    private func bulletRow(icon: String, tint: Color, text: String) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: icon)
-                .font(.caption)
-                .foregroundStyle(tint)
-                .padding(.top, 3)
-            Text(attributedMarkdown(text))
-                .textSelection(.enabled)
-        }
+        SummaryTabView(recording: recording,
+                       markdownContent: markdownContent,
+                       loadedSummary: $loadedSummary,
+                       isRegenerating: $isRegeneratingSummary,
+                       summaryError: $summaryError)
     }
 
     // MARK: - Toast
@@ -1108,32 +628,6 @@ struct TranscriptionView: View {
         isEditingName = false
         let trimmed = editName.trimmingCharacters(in: .whitespacesAndNewlines)
         store.update(recording.id) { $0.name = trimmed.isEmpty ? nil : trimmed }
-    }
-
-    private func regenerateSummary() async {
-        guard let content = markdownContent else { return }
-        isRegeneratingSummary = true
-        summaryError = nil
-        defer { isRegeneratingSummary = false }
-
-        do {
-            let summary = try await SummarizationService.summarize(
-                transcript: content,
-                provider: chatService.activeProvider,
-                namingContext: transcriptionService.namingContext(for: recording))
-            SummarizationService.saveSummary(summary, for: recording)
-            await MainActor.run { loadedSummary = summary }
-
-            // Auto-set name if not already named
-            if recording.name == nil {
-                let generatedName = summary.generatedName
-                await MainActor.run {
-                    store.update(recording.id) { $0.name = generatedName }
-                }
-            }
-        } catch {
-            await MainActor.run { summaryError = error.localizedDescription }
-        }
     }
 
     private func countMatches(in text: String, query: String) -> Int {
@@ -1276,42 +770,7 @@ struct TranscriptionView: View {
 
     private func exportSummary() {
         guard let summary = loadedSummary else { return }
-        var lines: [String] = []
-        let title = recording.name ?? "Recording — \(recording.formattedDate)"
-        lines.append("# Summary: \(title)")
-        lines.append("")
-        if let topics = summary.topics, !topics.isEmpty {
-            lines.append("**Topics:** \(topics.joined(separator: ", "))")
-            lines.append("")
-        }
-        lines.append("## Summary")
-        lines.append("")
-        lines.append(summary.summary)
-        lines.append("")
-        if let keyPoints = summary.keyPoints, !keyPoints.isEmpty {
-            lines.append("## Key Points")
-            lines.append("")
-            for point in keyPoints { lines.append("- \(point)") }
-            lines.append("")
-        }
-        if let decisions = summary.decisions, !decisions.isEmpty {
-            lines.append("## Decisions")
-            lines.append("")
-            for decision in decisions { lines.append("- \(decision)") }
-            lines.append("")
-        }
-        if !summary.actionItems.isEmpty {
-            lines.append("## Action Items")
-            lines.append("")
-            for item in summary.actionItems {
-                lines.append("- [ ] \(item)")
-            }
-            lines.append("")
-        }
-        lines.append("---")
-        lines.append("*Generated \(summary.generatedAt.formatted())\(summary.modelUsed.map { " with \($0)" } ?? "")*")
-
-        let content = lines.joined(separator: "\n")
+        let content = TranscriptExportContent.summaryMarkdown(summary, recording: recording)
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.plainText]
         let baseName = recording.name ?? "summary_\(recording.date.formatted(.dateTime.year().month().day()))"
@@ -1328,28 +787,7 @@ struct TranscriptionView: View {
     }
 
     private func exportChat() {
-        let chatURL = recording.fileURL.deletingPathExtension().appendingPathExtension("chat.json")
-        guard let data = try? Data(contentsOf: chatURL),
-              let history = try? JSONDecoder().decode(ChatHistory.self, from: data) else { return }
-
-        var lines: [String] = []
-        let title = recording.name ?? "Recording — \(recording.formattedDate)"
-        lines.append("# Chat: \(title)")
-        lines.append("")
-
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateStyle = .short
-        dateFormatter.timeStyle = .short
-
-        for msg in history.messages where msg.role != .system {
-            let sender = msg.role == .user ? "**You**" : "**AI**"
-            lines.append("\(sender) — \(dateFormatter.string(from: msg.timestamp))")
-            lines.append("")
-            lines.append(msg.content)
-            lines.append("")
-        }
-
-        let content = lines.joined(separator: "\n")
+        guard let content = TranscriptExportContent.chatMarkdown(for: recording) else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.plainText]
         let baseName = recording.name ?? "chat_\(recording.date.formatted(.dateTime.year().month().day()))"
@@ -1361,11 +799,6 @@ struct TranscriptionView: View {
     }
 
     private func sanitizeFilename(_ name: String) -> String {
-        let invalidChars = CharacterSet(charactersIn: "/\\:*?\"<>|")
-        return name.components(separatedBy: invalidChars).joined(separator: "_")
-    }
-
-    private func attributedMarkdown(_ markdown: String) -> AttributedString {
-        (try? AttributedString(markdown: markdown, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(markdown)
+        TranscriptExportContent.sanitizeFilename(name)
     }
 }
