@@ -63,6 +63,26 @@ xcodebuild -project AudioTranscriber9000.xcodeproj -scheme AudioTranscriber9000 
 
 Regenerate the project first if files changed: `xcodegen generate`.
 
+## iOS (simulator)
+
+```bash
+# Build + full unit suite on the simulator (same Tests/ sources; the 4
+# os(macOS)-guarded suites compile out — expect 188 tests there vs 195 on Mac):
+xcodebuild -project AudioTranscriber9000.xcodeproj -scheme AudioTranscriber9000iOS \
+  -destination 'platform=iOS Simulator,name=iPhone 17' test
+# Install + launch for manual probing:
+xcrun simctl privacy booted grant microphone com.audiortranscriber.AudioTranscriber.ios
+xcrun simctl install booted <DerivedData>/Build/Products/Debug-iphonesimulator/"Audio Transcriber 9000.app"
+xcrun simctl launch booted com.audiortranscriber.AudioTranscriber.ios
+xcrun simctl io booted screenshot /tmp/shot.png
+```
+
+- The `/tmp/audiotranscriber-integration-tests` marker file IS visible from simulator test processes (sim apps are host processes) — the same gate works.
+- **FluidAudio runs on the sim, CPU-only (no ANE)**: the 63 s fixture pipeline (`LocalEngineIntegrationTests`) ≈ **18 s** vs 2.4 s on the M1 Max — fine for correctness runs; never calibrate RTF expectations there.
+- Skip the ~1.5 GB model download by pre-seeding the host cache into the app container:
+  `cp -R ~/Library/Application\ Support/FluidAudio "$(xcrun simctl get_app_container <udid> com.audiortranscriber.AudioTranscriber.ios data)/Library/Application Support/"`
+- Prefer a dedicated simulator device; don't fight other projects over an already-booted one (another app can keep re-foregrounding itself).
+
 ## UI verification (osascript)
 
 The app must be launched and probed before claiming UI work done:
