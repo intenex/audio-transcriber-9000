@@ -61,9 +61,15 @@ struct RecordingControlView: View {
 
                 // Subtitle
                 if !audioRecorder.isRecording {
+                    #if os(macOS)
                     Text("Press Space to begin")
                         .font(.subheadline)
                         .foregroundStyle(.tertiary)
+                    #else
+                    Text("Tap to start recording")
+                        .font(.subheadline)
+                        .foregroundStyle(.tertiary)
+                    #endif
                 }
             }
 

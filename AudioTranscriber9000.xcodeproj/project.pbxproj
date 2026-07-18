@@ -65,6 +65,7 @@
 		4BE7AC3120306888D4C84F38 /* RecordingFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD83753FB3F3661327805DBA /* RecordingFormat.swift */; };
 		4BF67A7A28A0BB1E91A2F9F9 /* OpenAITranscriptionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A32FFDE1B02352883DC8E686 /* OpenAITranscriptionEngine.swift */; };
 		4F3479068146E26BD1E53CEC /* ChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46FF6FEF5D62CAF672578C81 /* ChatMessage.swift */; };
+		4FE474F412B172D20A21E848 /* IOSPlatformTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 662F935FEA0AA1473D4BBE5E /* IOSPlatformTests.swift */; };
 		50B0DE2F65C0E72A198591B5 /* RecordingMetaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 208EFBA4D39F75BF25815A92 /* RecordingMetaTests.swift */; };
 		52012A867E2B7FAC7D65FCE3 /* VoiceEnrollmentAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2963BD70F72625503E829A0 /* VoiceEnrollmentAction.swift */; };
 		5236C135B99BAABFD242A646 /* TranscriptTextBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C1D1D86AB3B876ADDC4D864 /* TranscriptTextBuilder.swift */; };
@@ -102,6 +103,7 @@
 		7865DBAC80E54CF115B32553 /* AppBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 140A4FD6F2943D0B91241239 /* AppBootstrap.swift */; };
 		7A8B943EAC9984B2FEBFBDCD /* LocalMLXChatProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7802F7F1524E5E7DC3AB537B /* LocalMLXChatProvider.swift */; };
 		7B68E8F26D6D4EBBFE675B47 /* RecordingMetaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 208EFBA4D39F75BF25815A92 /* RecordingMetaTests.swift */; };
+		7BEFBA14614F985CF8EA43A4 /* IOSPlatformTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 662F935FEA0AA1473D4BBE5E /* IOSPlatformTests.swift */; };
 		7C1502C95C9614AB575643ED /* ModelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33F4DE33ABF9936217E52B1B /* ModelManager.swift */; };
 		7C2FE0D3BB2A800FDAC94027 /* ModelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33F4DE33ABF9936217E52B1B /* ModelManager.swift */; };
 		7F1E0277E5CF28CA90FBFAB8 /* CheckpointLocation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E0B93573CAD9FD1172C1802 /* CheckpointLocation.swift */; };
@@ -166,6 +168,7 @@
 		DE70CCB8C8C785DC8F46450D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D9A01C65698F82010F003D69 /* Assets.xcassets */; };
 		E5CDB1129705AFD221316F4E /* TranscriptTextBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9FA4AF5842EF476CE507D6F /* TranscriptTextBuilderTests.swift */; };
 		E706F2399E75BA2CF5D1A9B5 /* ChatSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A66FC6C064637AC32005C58 /* ChatSessionView.swift */; };
+		E8D1592DCA5ADE8CA2E5E586 /* AudioSessionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 905E93BC5C6AFEA26BBF4C8B /* AudioSessionController.swift */; };
 		E90E6096BED49268A7B4235E /* ChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46FF6FEF5D62CAF672578C81 /* ChatMessage.swift */; };
 		E9BFDFFB12A255096721C924 /* RecordingStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21C0DE30F455E1BD9B7A2257 /* RecordingStoreTests.swift */; };
 		EA0DCDA7150F0C7C64E47E14 /* TranscriptionCheckpoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A0E5CFDA09C4E91AE18151A /* TranscriptionCheckpoint.swift */; };
@@ -179,6 +182,7 @@
 		F265A943E461EDF36E14639A /* RecorderSpoolIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92FC035E95B9265B1983D251 /* RecorderSpoolIntegrationTests.swift */; };
 		F3D75CE508E97CAE618681FE /* SummaryTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50B26C69520A2D9DB202A587 /* SummaryTabView.swift */; };
 		F42F6ACFFDD10856284FD843 /* AppBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 140A4FD6F2943D0B91241239 /* AppBootstrap.swift */; };
+		F4A0D5E12ED6B6F480FEE1EA /* AudioSessionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 905E93BC5C6AFEA26BBF4C8B /* AudioSessionController.swift */; };
 		F4C357FB716B8488C80D66F3 /* MultipartFormData.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0AEF0436FAA8EB4E7CDB62C /* MultipartFormData.swift */; };
 		F7610A75210F97C1E09903E8 /* MockURLProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5208E3A39609DF4E771AE561 /* MockURLProtocol.swift */; };
 		F865DDE838673069D1D46DB6 /* SharedUtilsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4273CEC7D9439939F16B8119 /* SharedUtilsTests.swift */; };
@@ -247,6 +251,7 @@
 		6400575764B59450B6CD5F4B /* TranscriptionServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionServiceTests.swift; sourceTree = "<group>"; };
 		64E0DC896410E1655A2D23C9 /* AudioCompressor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioCompressor.swift; sourceTree = "<group>"; };
 		653A90EDBCB266AE7352A7DD /* TranscriptionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionService.swift; sourceTree = "<group>"; };
+		662F935FEA0AA1473D4BBE5E /* IOSPlatformTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPlatformTests.swift; sourceTree = "<group>"; };
 		66709307226A3BCCAAE6940A /* LocalFluidAudioEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalFluidAudioEngine.swift; sourceTree = "<group>"; };
 		671BF077C8DD38C71D49DAA4 /* SpeakerMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMatcher.swift; sourceTree = "<group>"; };
 		6C76A77342EDF17290281C8A /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
@@ -263,6 +268,7 @@
 		8B5D5CC3AEDB4489D0A90CD5 /* OpenAICompatibleChatProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAICompatibleChatProvider.swift; sourceTree = "<group>"; };
 		8B8A2EB8AB4A57B6FDD77811 /* ReferenceClipExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReferenceClipExtractor.swift; sourceTree = "<group>"; };
 		8DC0297054C4E420747729B0 /* ChatProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatProviderTests.swift; sourceTree = "<group>"; };
+		905E93BC5C6AFEA26BBF4C8B /* AudioSessionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSessionController.swift; sourceTree = "<group>"; };
 		92FC035E95B9265B1983D251 /* RecorderSpoolIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecorderSpoolIntegrationTests.swift; sourceTree = "<group>"; };
 		952FB2A6A77B93C8F77B2DD8 /* TranscriptionCostEstimator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionCostEstimator.swift; sourceTree = "<group>"; };
 		9761CB4AA52DE14E2371BEAD /* CondaEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CondaEnvironment.swift; sourceTree = "<group>"; };
@@ -401,6 +407,7 @@
 				4D8EF1691B0224E2CD5EA0B1 /* CloudEngineTests.swift */,
 				30D4A9F6332FEE198F4CF875 /* DiarizerThresholdSweepTests.swift */,
 				AE5D296B2642BBFE770390D7 /* ImportURLsTests.swift */,
+				662F935FEA0AA1473D4BBE5E /* IOSPlatformTests.swift */,
 				E8BA483C501BE0A3CC4CB6DB /* KeychainFieldLiveTests.swift */,
 				0CBC3CFBE9DA2C26B288B7BB /* LiveFixVerificationTests.swift */,
 				1A3A5A2436579319533D6FB8 /* LocalEngineIntegrationTests.swift */,
@@ -423,6 +430,14 @@
 			);
 			name = AudioTranscriberTests;
 			path = Tests/AudioTranscriberTests;
+			sourceTree = "<group>";
+		};
+		75A9E1230B15D137D450DC25 /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				905E93BC5C6AFEA26BBF4C8B /* AudioSessionController.swift */,
+			);
+			path = iOS;
 			sourceTree = "<group>";
 		};
 		83A280552EE96371F2BB680A /* Mac */ = {
@@ -546,6 +561,7 @@
 				4498CCAC06D1956CE57FD2C4 /* SleepGuard.swift */,
 				9BFBA6DEA7C8C499A9C6AB0F /* SummarizationService.swift */,
 				653A90EDBCB266AE7352A7DD /* TranscriptionService.swift */,
+				75A9E1230B15D137D450DC25 /* iOS */,
 				BD444A936543668AB85EEC74 /* Providers */,
 				C793AC69B1EC13036BE38295 /* Shared */,
 				CA0E3489FFA78E2F3EF15B48 /* SpeakerLibrary */,
@@ -742,6 +758,7 @@
 				B305F2154AD183D1B0B22699 /* CheckpointRelocationTests.swift in Sources */,
 				5E227512EA209B03B5D877CF /* CloudEngineTests.swift in Sources */,
 				EE307758C1B37B1E2D5AC14F /* DiarizerThresholdSweepTests.swift in Sources */,
+				7BEFBA14614F985CF8EA43A4 /* IOSPlatformTests.swift in Sources */,
 				218BF7303339C3EA8FD20041 /* ImportURLsTests.swift in Sources */,
 				93C23B6418204EB6DCC56DD7 /* KeychainFieldLiveTests.swift in Sources */,
 				A9B76B486CDDA930F050D800 /* LiveFixVerificationTests.swift in Sources */,
@@ -774,6 +791,7 @@
 				5482CCF201E286203F1AC65E /* AtomicFile.swift in Sources */,
 				59560E5F266DF5FD45593C64 /* AudioCompressor.swift in Sources */,
 				34DAA991765E97AF97FFBAA5 /* AudioRecorder.swift in Sources */,
+				F4A0D5E12ED6B6F480FEE1EA /* AudioSessionController.swift in Sources */,
 				C94D25EDF600B61DE9551DE4 /* AudioSplitPlanner.swift in Sources */,
 				56DECF411262AE91D713ED38 /* AudioTranscriberApp.swift in Sources */,
 				4F3479068146E26BD1E53CEC /* ChatMessage.swift in Sources */,
@@ -846,6 +864,7 @@
 				543BE7BCAA3E4A8ACBF3C90C /* AtomicFile.swift in Sources */,
 				04115E98CC509301825601D3 /* AudioCompressor.swift in Sources */,
 				1251EA72263221A217CF0041 /* AudioRecorder.swift in Sources */,
+				E8D1592DCA5ADE8CA2E5E586 /* AudioSessionController.swift in Sources */,
 				0B63BC4A157E4D93CB24B165 /* AudioSplitPlanner.swift in Sources */,
 				CBB7973AF6B4150CED1386D2 /* AudioTranscriberIOSApp.swift in Sources */,
 				E90E6096BED49268A7B4235E /* ChatMessage.swift in Sources */,
@@ -914,6 +933,7 @@
 				5EDCE8A80420B7CA16958097 /* CheckpointRelocationTests.swift in Sources */,
 				B407675891EB31E810443A66 /* CloudEngineTests.swift in Sources */,
 				18CDCF1FAAC9A93A97DF7310 /* DiarizerThresholdSweepTests.swift in Sources */,
+				4FE474F412B172D20A21E848 /* IOSPlatformTests.swift in Sources */,
 				499D4D5404C3A812BFEEFB9D /* ImportURLsTests.swift in Sources */,
 				7743518D0910775B8AC5925B /* KeychainFieldLiveTests.swift in Sources */,
 				D50845107F8A3EB9236420FD /* LiveFixVerificationTests.swift in Sources */,

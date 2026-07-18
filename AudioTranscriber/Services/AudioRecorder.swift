@@ -30,6 +30,16 @@ final class AudioRecorder: NSObject {
     @MainActor
     func attach(store: RecordingStore) {
         self.store = store
+        #if os(iOS)
+        AudioSessionController.shared.onRecordingInterrupted = { [weak self] reason in
+            guard let self, self.isRecording else { return }
+            self.stopRecording()
+            self.errorMessage = "Recording saved — \(reason)."
+        }
+        AudioSessionController.shared.onPlaybackInterrupted = { [weak self] in
+            self?.stopPlayback()
+        }
+        #endif
     }
 
     // MARK: - Permissions
@@ -62,6 +72,16 @@ final class AudioRecorder: NSObject {
     func startRecording() {
         guard !isRecording else { return }
         guard let store else { return }
+
+        #if os(iOS)
+        // The session must be active before the engine touches the input node.
+        do {
+            try AudioSessionController.shared.activateRecording()
+        } catch {
+            errorMessage = "Could not activate the audio session: \(error.localizedDescription)"
+            return
+        }
+        #endif
 
         let format = RecordingFormat.selected
         let filename = "recording_\(dateString()).\(format.fileExtension)"
@@ -178,6 +198,9 @@ final class AudioRecorder: NSObject {
         isRecording = false
         sleepGuard = nil
         liveTranscriber?.stop()
+        #if os(iOS)
+        AudioSessionController.shared.endRecordingSession()
+        #endif
 
         // Authoritative duration = frames actually written; wall-clock as fallback.
         let fileDuration = sampleRate > 0 ? Double(writtenFrames) / sampleRate : 0
@@ -204,6 +227,9 @@ final class AudioRecorder: NSObject {
         }
         stopPlayback()
         do {
+            #if os(iOS)
+            try AudioSessionController.shared.activatePlayback()
+            #endif
             audioPlayer = try AVAudioPlayer(contentsOf: recording.fileURL)
             audioPlayer?.delegate = self
             audioPlayer?.enableRate = true
@@ -225,6 +251,9 @@ final class AudioRecorder: NSObject {
         }
         stopPlayback()
         do {
+            #if os(iOS)
+            try AudioSessionController.shared.activatePlayback()
+            #endif
             audioPlayer = try AVAudioPlayer(contentsOf: recording.fileURL)
             audioPlayer?.delegate = self
             audioPlayer?.enableRate = true
