@@ -36,7 +36,7 @@ final class SpeakerLibraryStore {
     }
 
     private var directory: URL
-    private var libraryURL: URL { directory.appendingPathComponent("library.json") }
+    var libraryURL: URL { directory.appendingPathComponent("library.json") }
     var clipsDirectory: URL { directory.appendingPathComponent("clips", isDirectory: true) }
 
     init(storageDirectory: URL? = nil) {

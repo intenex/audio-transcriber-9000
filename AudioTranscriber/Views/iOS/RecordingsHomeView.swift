@@ -8,6 +8,7 @@ struct RecordingsHomeView: View {
     @Environment(RecordingStore.self) private var store
     @Environment(AudioRecorder.self) private var audioRecorder
     @Environment(TranscriptionService.self) private var transcriptionService
+    @Environment(CloudSyncManager.self) private var cloudSync
 
     @State private var searchText = ""
     @State private var showingRecordSheet = false
@@ -162,10 +163,33 @@ struct RecordingsHomeView: View {
     @ViewBuilder
     private func rowMenu(for recording: Recording) -> some View {
         Button {
-            audioRecorder.playRecording(recording)
+            if case .placeholder = cloudSync.state(for: recording) {
+                cloudSync.requestDownload(recording)
+                store.infoMessage = "Downloading “\(recording.displayName)” from iCloud — it will be playable in a moment."
+            } else {
+                audioRecorder.playRecording(recording)
+            }
         } label: {
             let playingThis = audioRecorder.isPlaying && audioRecorder.playingRecordingID == recording.id
             Label(playingThis ? "Stop" : "Play", systemImage: playingThis ? "stop.fill" : "play.fill")
+        }
+        if cloudSync.isEnabled {
+            switch cloudSync.state(for: recording) {
+            case .placeholder:
+                Button {
+                    cloudSync.requestDownload(recording)
+                } label: {
+                    Label("Download from iCloud", systemImage: "icloud.and.arrow.down")
+                }
+            case .current:
+                Button {
+                    cloudSync.evictAudio(recording)
+                } label: {
+                    Label("Remove Download", systemImage: "xmark.icloud")
+                }
+            default:
+                EmptyView()
+            }
         }
         if recording.status.canStartTranscription {
             Menu {
@@ -302,6 +326,7 @@ struct HomeRecordingRow: View {
             .foregroundStyle(.secondary)
             HStack(spacing: 6) {
                 StatusPill(status: recording.status)
+                CloudSyncBadge(recording: recording)
                 if let progress = store.compressingProgress[recording.id] {
                     ProgressView(value: progress)
                         .frame(width: 80)

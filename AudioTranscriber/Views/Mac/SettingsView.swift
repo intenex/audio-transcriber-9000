@@ -393,6 +393,8 @@ struct StorageSettingsTab: View {
                 speakerLibrary.attach(storageDirectory: store.storageDirectory)
             }
 
+            CloudSyncSection()
+
             Section {
                 Button("Open Storage Folder") {
                     NSWorkspace.shared.open(store.storageDirectory)

@@ -153,6 +153,8 @@ struct SettingsHomeView: View {
                 Text("Voices are matched on-device. Clips are only sent to a cloud engine when you choose one for transcription.")
             }
 
+            CloudSyncSection()
+
             Section {
                 Picker("Recording format", selection: $recordingFormat) {
                     ForEach(RecordingFormat.allCases, id: \.rawValue) { format in

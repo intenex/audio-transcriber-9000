@@ -4,6 +4,7 @@ struct RecordingListView: View {
     @Environment(RecordingStore.self) private var store
     @Environment(AudioRecorder.self) private var audioRecorder
     @Environment(TranscriptionService.self) private var transcriptionService
+    @Environment(CloudSyncManager.self) private var cloudSync
     @Binding var selectedRecordingID: UUID?
     @Binding var showGlobalChat: Bool
     @State private var searchQuery = ""
@@ -214,9 +215,33 @@ struct RecordingListView: View {
     @ViewBuilder
     private func rowContextMenu(_ recording: Recording) -> some View {
         Button {
-            audioRecorder.playRecording(recording)
+            if case .placeholder = cloudSync.state(for: recording) {
+                cloudSync.requestDownload(recording)
+                store.infoMessage = "Downloading “\(recording.displayName)” from iCloud — it will be playable in a moment."
+            } else {
+                audioRecorder.playRecording(recording)
+            }
         } label: {
             Label("Play", systemImage: "play.fill")
+        }
+
+        if cloudSync.isEnabled {
+            switch cloudSync.state(for: recording) {
+            case .placeholder:
+                Button {
+                    cloudSync.requestDownload(recording)
+                } label: {
+                    Label("Download from iCloud", systemImage: "icloud.and.arrow.down")
+                }
+            case .current:
+                Button {
+                    cloudSync.evictAudio(recording)
+                } label: {
+                    Label("Remove Download (keep in iCloud)", systemImage: "xmark.icloud")
+                }
+            default:
+                EmptyView()
+            }
         }
 
         Menu {
@@ -424,6 +449,8 @@ struct RecordingRow: View {
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(.quaternary.opacity(0.5), in: Capsule())
+
+                    CloudSyncBadge(recording: recording)
 
                     if let progress = store.compressingProgress[recording.id] {
                         HStack(spacing: 4) {

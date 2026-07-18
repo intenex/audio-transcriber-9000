@@ -36,6 +36,15 @@ final class RecordingStore {
     }
 
     private static func resolveStorageDirectory(defaults: UserDefaults) -> URL {
+        // Cloud mode: the ubiquity container's Documents IS the library.
+        // The path is cached by CloudSyncManager.bootstrap (resolving it is a
+        // blocking call that must not happen here on the main thread).
+        if defaults.bool(forKey: CloudSyncManager.enabledKey),
+           let cloudPath = defaults.string(forKey: CloudSyncManager.containerPathKey),
+           !cloudPath.isEmpty,
+           FileManager.default.fileExists(atPath: cloudPath) {
+            return URL(fileURLWithPath: cloudPath, isDirectory: true)
+        }
         if let custom = defaults.string(forKey: "storageDirectory"), !custom.isEmpty {
             return URL(fileURLWithPath: custom, isDirectory: true)
         }
@@ -44,7 +53,15 @@ final class RecordingStore {
     }
 
     private var manifestURL: URL {
-        storageDirectory.appendingPathComponent(Self.manifestFileName)
+        // In cloud mode the manifest cache stays OUT of the synced tree —
+        // it's debounce-churned and fully rebuildable from meta sidecars.
+        if defaults.bool(forKey: CloudSyncManager.enabledKey) {
+            let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("AudioTranscriber/Cache", isDirectory: true)
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            return dir.appendingPathComponent("recordings-cloud.json")
+        }
+        return storageDirectory.appendingPathComponent(Self.manifestFileName)
     }
 
     /// Synced master list of categories (the manifest's copy is a local cache).
@@ -77,8 +94,9 @@ final class RecordingStore {
         // Applying it here is what makes edits from another synced device land.
         loaded = loaded.map { applyMetaIfPresent(to: $0) }
 
-        // Drop entries whose audio file no longer exists.
-        loaded = loaded.filter { FileManager.default.fileExists(atPath: $0.fileURL.path) }
+        // Drop entries whose audio file no longer exists. A not-downloaded
+        // iCloud placeholder counts as existing — evicted ≠ deleted.
+        loaded = loaded.filter { CloudPlaceholder.existsIncludingPlaceholder($0.fileURL) }
 
         // Orphan adoption: any .wav in the storage dir not in the manifest becomes a recording.
         let known = Set(loaded.map { $0.fileURL.standardizedFileURL.path })
@@ -106,8 +124,10 @@ final class RecordingStore {
         }
 
         // Fill in missing file sizes (cheap stat calls, cached in the manifest).
+        // Placeholders keep whatever the meta sidecar knew.
         for idx in loaded.indices where loaded[idx].fileSizeBytes == nil {
-            loaded[idx].fileSizeBytes = Self.fileSize(of: loaded[idx].fileURL)
+            let size = Self.fileSize(of: loaded[idx].fileURL)
+            if size > 0 { loaded[idx].fileSizeBytes = size }
         }
 
         // Heal stale durations: data migrated from the old app carried
@@ -194,6 +214,33 @@ final class RecordingStore {
             }
             if hasTranscript {
                 recording.transcriptionURL = markdown
+                recording.status = .done
+            }
+            orphans.append(recording)
+        }
+
+        // Cloud mode: not-downloaded items exist only as hidden
+        // ".<name>.icloud" stubs (skipsHiddenFiles misses them). Adopt via the
+        // meta sidecar — identity, duration, and size without the content.
+        let allEntries = (try? FileManager.default.contentsOfDirectory(
+            at: storageDirectory, includingPropertiesForKeys: nil, options: []
+        )) ?? []
+        let adopted = Set(orphans.map { $0.fileURL.standardizedFileURL.path })
+        for stub in allEntries {
+            guard let realName = CloudPlaceholder.fileName(forPlaceholderName: stub.lastPathComponent) else { continue }
+            let realURL = storageDirectory.appendingPathComponent(realName)
+            let path = realURL.standardizedFileURL.path
+            guard audioExtensions.contains(realURL.pathExtension.lowercased()),
+                  !known.contains(path), !adopted.contains(path),
+                  !FileManager.default.fileExists(atPath: realURL.path),
+                  let meta = Self.readMeta(besides: realURL) else { continue }
+            var recording = Recording(id: meta.id, fileURL: realURL, date: meta.date,
+                                      duration: meta.duration,
+                                      name: meta.name, category: meta.category,
+                                      engineUsed: meta.engineUsed,
+                                      fileSizeBytes: meta.fileSizeBytes)
+            if CloudPlaceholder.existsIncludingPlaceholder(recording.markdownURL) {
+                recording.transcriptionURL = recording.markdownURL
                 recording.status = .done
             }
             orphans.append(recording)
@@ -346,8 +393,12 @@ final class RecordingStore {
 
     func delete(_ recording: Recording) {
         try? FileManager.default.removeItem(at: recording.fileURL)
+        // Deleting a not-downloaded item = removing its placeholder stub
+        // (which deletes the cloud copy).
+        try? FileManager.default.removeItem(at: CloudPlaceholder.placeholderURL(for: recording.fileURL))
         for sidecar in recording.allSidecarURLs {
             try? FileManager.default.removeItem(at: sidecar)
+            try? FileManager.default.removeItem(at: CloudPlaceholder.placeholderURL(for: sidecar))
         }
         recordings.removeAll { $0.id == recording.id }
         save()

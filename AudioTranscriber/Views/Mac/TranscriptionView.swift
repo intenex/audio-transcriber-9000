@@ -11,6 +11,7 @@ struct TranscriptionView: View {
     @Environment(ChatService.self) private var chatService
     @Environment(SpeakerLibraryStore.self) private var speakerLibrary
     @Environment(ModelManager.self) private var modelManager
+    @Environment(CloudSyncManager.self) private var cloudSync
 
     @State private var markdownContent: String? = nil
     @State private var segments: [TranscriptionSegment]? = nil
@@ -377,6 +378,11 @@ struct TranscriptionView: View {
 
     private func startTranscription(using kind: TranscriptionEngineKind) {
         guard TranscribeEngineHelper.isConfigured(kind) else { return }
+        if case .placeholder = cloudSync.state(for: recording) {
+            cloudSync.requestDownload(recording)
+            store.infoMessage = "Downloading “\(recording.displayName)” from iCloud first — start the transcription again once it's downloaded."
+            return
+        }
         if kind.isCloud && confirmCloud {
             cloudConfirmKind = kind
         } else {

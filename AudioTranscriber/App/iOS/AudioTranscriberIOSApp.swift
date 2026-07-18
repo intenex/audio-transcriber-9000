@@ -11,6 +11,7 @@ struct AudioTranscriberIOSApp: App {
     @State private var speakerLibrary = SpeakerLibraryStore()
     @State private var liveTranscriber = LiveTranscriber()
     @State private var backgroundCoordinator = TranscriptionBackgroundCoordinator()
+    @State private var cloudSync = CloudSyncManager()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
@@ -23,6 +24,7 @@ struct AudioTranscriberIOSApp: App {
                 .environment(modelManager)
                 .environment(speakerLibrary)
                 .environment(liveTranscriber)
+                .environment(cloudSync)
                 .onAppear {
                     AppBootstrap.wire(recordingStore: recordingStore,
                                       audioRecorder: audioRecorder,
@@ -30,7 +32,8 @@ struct AudioTranscriberIOSApp: App {
                                       chatService: chatService,
                                       modelManager: modelManager,
                                       speakerLibrary: speakerLibrary,
-                                      liveTranscriber: liveTranscriber)
+                                      liveTranscriber: liveTranscriber,
+                                      cloudSync: cloudSync)
                     backgroundCoordinator.attach(transcriptionService: transcriptionService,
                                                  audioRecorder: audioRecorder)
                 }

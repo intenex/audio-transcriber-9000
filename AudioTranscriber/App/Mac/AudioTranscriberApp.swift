@@ -9,6 +9,7 @@ struct AudioTranscriberApp: App {
     @State private var modelManager = ModelManager()
     @State private var speakerLibrary = SpeakerLibraryStore()
     @State private var liveTranscriber = LiveTranscriber()
+    @State private var cloudSync = CloudSyncManager()
 
     var body: some Scene {
         WindowGroup {
@@ -20,6 +21,7 @@ struct AudioTranscriberApp: App {
                 .environment(modelManager)
                 .environment(speakerLibrary)
                 .environment(liveTranscriber)
+                .environment(cloudSync)
                 .onAppear {
                     AppBootstrap.wire(recordingStore: recordingStore,
                                       audioRecorder: audioRecorder,
@@ -27,7 +29,8 @@ struct AudioTranscriberApp: App {
                                       chatService: chatService,
                                       modelManager: modelManager,
                                       speakerLibrary: speakerLibrary,
-                                      liveTranscriber: liveTranscriber)
+                                      liveTranscriber: liveTranscriber,
+                                      cloudSync: cloudSync)
                 }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                     recordingStore.saveNow()
@@ -54,6 +57,7 @@ struct AudioTranscriberApp: App {
                 .environment(chatService)
                 .environment(modelManager)
                 .environment(speakerLibrary)
+                .environment(cloudSync)
         }
     }
 }

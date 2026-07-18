@@ -13,9 +13,14 @@ enum AppBootstrap {
                      chatService: ChatService,
                      modelManager: ModelManager,
                      speakerLibrary: SpeakerLibraryStore,
-                     liveTranscriber: LiveTranscriber) {
+                     liveTranscriber: LiveTranscriber,
+                     cloudSync: CloudSyncManager? = nil) {
         LegacySettingsMigrator.runOnce()
         recordingStore.load()
+        if let cloudSync {
+            cloudSync.attach(recordingStore: recordingStore, speakerLibrary: speakerLibrary)
+            Task { await cloudSync.bootstrap() }
+        }
         speakerLibrary.attach(storageDirectory: recordingStore.storageDirectory)
         audioRecorder.attach(store: recordingStore)
         audioRecorder.liveTranscriber = liveTranscriber
