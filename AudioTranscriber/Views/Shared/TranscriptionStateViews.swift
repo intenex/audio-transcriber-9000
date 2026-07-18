@@ -3,6 +3,12 @@ import SwiftUI
 // The status/pending/active/queued/failed presentation for a recording,
 // shared verbatim by the Mac detail pane and the iOS detail screen.
 
+enum DetailTab: String, CaseIterable {
+    case transcript = "Transcript"
+    case summary = "Summary"
+    case chat = "Chat"
+}
+
 struct StatusPill: View {
     let status: TranscriptionStatus
 

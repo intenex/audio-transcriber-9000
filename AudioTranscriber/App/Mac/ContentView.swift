@@ -23,25 +23,6 @@ struct ContentView: View {
                 RecordingControlView()
             }
         }
-        .alert("Error", isPresented: .constant(audioRecorder.errorMessage != nil)) {
-            Button("OK") { audioRecorder.errorMessage = nil }
-        } message: {
-            Text(audioRecorder.errorMessage ?? "")
-        }
-        .alert("Transcription Error", isPresented: .constant(transcriptionService.errorMessage != nil)) {
-            Button("OK") { transcriptionService.errorMessage = nil }
-        } message: {
-            Text(transcriptionService.errorMessage ?? "")
-        }
-        .alert("Library Error", isPresented: .constant(store.errorMessage != nil)) {
-            Button("OK") { store.errorMessage = nil }
-        } message: {
-            Text(store.errorMessage ?? "")
-        }
-        .alert("Done", isPresented: .constant(store.infoMessage != nil)) {
-            Button("OK") { store.infoMessage = nil }
-        } message: {
-            Text(store.infoMessage ?? "")
-        }
+        .serviceAlerts()
     }
 }

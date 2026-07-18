@@ -3,12 +3,6 @@ import AppKit
 import CoreMedia
 import UniformTypeIdentifiers
 
-enum DetailTab: String, CaseIterable {
-    case transcript = "Transcript"
-    case summary = "Summary"
-    case chat = "Chat"
-}
-
 struct TranscriptionView: View {
     let recording: Recording
     @Environment(RecordingStore.self) private var store
