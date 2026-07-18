@@ -68,11 +68,16 @@ struct RecordingsHomeView: View {
                     Image(systemName: "bubble.left.and.bubble.right")
                 }
             }
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
                 Button {
                     showingImporter = true
                 } label: {
                     Image(systemName: "square.and.arrow.down")
+                }
+                NavigationLink {
+                    SettingsHomeView()
+                } label: {
+                    Image(systemName: "gearshape")
                 }
             }
         }

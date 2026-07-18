@@ -10,6 +10,7 @@ struct AudioTranscriberIOSApp: App {
     @State private var modelManager = ModelManager()
     @State private var speakerLibrary = SpeakerLibraryStore()
     @State private var liveTranscriber = LiveTranscriber()
+    @State private var backgroundCoordinator = TranscriptionBackgroundCoordinator()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
@@ -30,13 +31,21 @@ struct AudioTranscriberIOSApp: App {
                                       modelManager: modelManager,
                                       speakerLibrary: speakerLibrary,
                                       liveTranscriber: liveTranscriber)
+                    backgroundCoordinator.attach(transcriptionService: transcriptionService,
+                                                 audioRecorder: audioRecorder)
                 }
         }
         .onChange(of: scenePhase) { _, phase in
-            // iOS has no willTerminate equivalent worth relying on —
-            // backgrounding is the save point.
-            if phase == .background {
+            switch phase {
+            case .background:
+                // iOS has no willTerminate equivalent worth relying on —
+                // backgrounding is the save point.
                 recordingStore.saveNow()
+                backgroundCoordinator.appDidEnterBackground()
+            case .active:
+                backgroundCoordinator.appDidBecomeActive()
+            default:
+                break
             }
         }
     }
