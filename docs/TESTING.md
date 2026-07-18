@@ -54,6 +54,7 @@ rm /tmp/audiotranscriber-integration-tests
 | `LongFileSmokeTests` (5 h) | The real 4 h 56 m / **3.4 GB** recording — the file whose >2 GB payload crashed the old single-shot loader with error -40: 99 chunks, 544 segments, 100 % coverage via `WindowedAudioLoader` | 362 s (49×) |
 | `DiarizerThresholdSweepTests` | Tuning harness: speaker count per clusteringThreshold on the fixture (0.85 ⇒ 2 ✓) | ~10 s |
 | `RecorderSpoolIntegrationTests` | Real-mic record flow: live file streams into the spool (never the library), stop finalizes the container and renames it into the library with header-verified duration, spool left clean | ~5 s |
+| `RealICloudSmokeTests` (Mac, needs full signing + iCloud account) | Migrates a SCRATCH library into the REAL ubiquity container with the real ICloudSyncEngine (compress → copy → verify → repoint; engine reports uploading/current), disable returns to local, all scratch files removed from the container. Isolated defaults — the user's library/settings untouched | ~1 s |
 
 Long real samples referenced by the integration tests live in `~/Documents/AudioTranscriber/` (tests `XCTSkip` when absent).
 
