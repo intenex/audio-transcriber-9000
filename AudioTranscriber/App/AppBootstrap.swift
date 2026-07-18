@@ -7,6 +7,9 @@ import Foundation
 /// permissions/model refresh.
 @MainActor
 enum AppBootstrap {
+    /// Retained for the app's lifetime (observes defaults + the KV store).
+    private static var syncedDefaults: SyncedDefaults? = nil
+
     static func wire(recordingStore: RecordingStore,
                      audioRecorder: AudioRecorder,
                      transcriptionService: TranscriptionService,
@@ -16,6 +19,14 @@ enum AppBootstrap {
                      liveTranscriber: LiveTranscriber,
                      cloudSync: CloudSyncManager? = nil) {
         LegacySettingsMigrator.runOnce()
+        // Promote device-local API keys to iCloud-synchronizable items when
+        // signing allows (no-op otherwise; retried each launch).
+        KeychainStore.shared.migrateLegacyItemsIfPossible()
+        if syncedDefaults == nil {
+            let synced = SyncedDefaults()
+            synced.activate()
+            syncedDefaults = synced
+        }
         recordingStore.load()
         if let cloudSync {
             cloudSync.attach(recordingStore: recordingStore, speakerLibrary: speakerLibrary)
