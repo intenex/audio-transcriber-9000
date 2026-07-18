@@ -4,7 +4,7 @@ What exists, how to run it, and what "verified" means in this project. See [DEVE
 
 ## Test suites (Tests/AudioTranscriberTests/, `@testable import AudioTranscriber`)
 
-**Unit — always run, no network, no models (187 tests as of 2026-07-17):**
+**Unit — always run, no network, no models (200 on macOS / 204 on the iOS simulator as of 2026-07-18):**
 
 | Suite | Covers |
 |---|---|
@@ -15,6 +15,11 @@ What exists, how to run it, and what "verified" means in this project. See [DEVE
 | `CheckpointRelocationTests` | checkpoint path is ID-keyed under Application Support (never inside the library), legacy `<stem>.partial.json` migrates at load and launch repair sees it, delete cleans the relocated file. Tests that write real checkpoints must clean up (the location is global) |
 | `SpoolTests` | finalize moves a spool file into the library; launch sweep salvages crash leftovers (>4 KB) and deletes stubs; the sweep never touches `store.activeRecordingURL` (the live recording) |
 | `ImportURLsTests` | platform-neutral import API: copy vs compress-to-m4a, compress flag ignored for already-compressed sources, always/never/ask policy resolution, estimate counts only compressibles |
+| `ConflictMergeTests` | sync conflict policies: meta LWW by updatedAt, speaker-name union w/ newer-file-wins, category union, per-speaker library merge by id (clips/embeddings/recordingIDs union) |
+| `CloudModeStoreTests` | cloud-mode store: storage dir resolves to the container, manifest cache stays OUT of the synced tree, evicted placeholder rows survive load via .meta.json and delete removes the stub |
+| `MigrationAndWatcherTests` | full enable-sync cycle against the fake engine (compress → copy → verify → repoint; identity/categories/sidecars preserved; old library untouched; disable returns to local) + watcher change batch → debounced library reload |
+| `SyncedDefaultsTests` | preference mirroring: initial reconcile prefers local, local edits push, remote changes pull, device-local keys never sync (fake NSUbiquitousKeyValueStore) |
+| `IOSPlatformTests` (iOS-only) | AVAudioSession category switching + record-session precedence, SleepGuard idle-timer refcount, background coordinator (expiry-pause → auto-resume of system pauses only; user pauses survive; recording no-op guard) |
 | `TranscriptTextBuilderTests` | shared transcript renderer: word ranges map back to exact text, same-speaker grouping under one header, interpolation fallback without word timings, case-insensitive search ranges, range-at-time + tap-to-seek lookup |
 | `TranscriptionQueueTests` | queue semantics with `MockTranscriptionEngine`: serial order, dedupe, pause keeps checkpoint → `.paused`, cancel deletes → `.pending`, failure → `.failed`, sidecar bytes written |
 | `ChatProviderTests` / `ChatServiceSelectionTests` | SSE token streaming, system-prompt prepend, MiniMax `reasoning_content` + `base_resp` error on HTTP 200, 401/missing-key paths, undecodable-chunk tolerance; provider auto-selection (MiniMax→OpenAI→local, explicit wins) |
@@ -82,6 +87,22 @@ xcrun simctl io booted screenshot /tmp/shot.png
 - Skip the ~1.5 GB model download by pre-seeding the host cache into the app container:
   `cp -R ~/Library/Application\ Support/FluidAudio "$(xcrun simctl get_app_container <udid> com.audiortranscriber.AudioTranscriber.ios data)/Library/Application Support/"`
 - Prefer a dedicated simulator device; don't fight other projects over an already-booted one (another app can keep re-foregrounding itself).
+
+## Signing states (matters for what can run)
+
+- **Fully signed** (Xcode logged into the Apple ID, automatic signing, team Z6FHNWFTWR): everything works incl. iCloud entitlements. Build with `-allowProvisioningUpdates` at least once after entitlement changes.
+- **Ad-hoc interim** (Apple ID session expired): an ad-hoc app carrying the restricted iCloud entitlements BUILDS but cannot LAUNCH — run Mac tests with
+  `CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="-" DEVELOPMENT_TEAM="" CODE_SIGN_ENTITLEMENTS=""`
+  (no entitlements → no mic for the gated recorder test; everything else runs; sync logic is fake-engine-tested anyway). Simulator builds are unaffected either way.
+
+## Real-iCloud manual checklist (needs full signing + the user's Apple ID)
+
+1. Mac: enable sync in Settings → Storage → migration sheet runs (compress → copy → verify → switch); verify `~/Library/Mobile Documents/iCloud~com~audiortranscriber~AudioTranscriber/Documents/` mirrors the library; watch uploads with `brctl monitor` / `brctl log -w`.
+2. Record → file appears in the spool, then the container after stop; transcribe → checkpoint stays in Application Support; pause/resume mid-job.
+3. Second device (iPhone with the app; the iOS **Simulator's** iCloud is flaky — prefer hardware): library appears; rename/recategorize on one device → the other updates via the watcher; evict → placeholder badge; play → downloads then plays.
+4. Conflict drill: airplane-mode both devices, rename the same recording differently, reconnect → newest `updatedAt` wins, no duplicate rows; edit speaker names on both → union survives.
+5. One-time re-grants after the signing switch: microphone TCC prompt, Keychain access prompts for pre-existing API keys (the keys then auto-migrate to iCloud Keychain).
+6. Kill-switch: sign out of iCloud → the app falls back to the local library; no crash, no data loss.
 
 ## UI verification (osascript)
 
