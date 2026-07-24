@@ -543,9 +543,23 @@ struct RecordingControlRow: View {
                 Text(audioRecorder.isRecording ? "Stop Recording" : "New Recording")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(audioRecorder.isRecording ? AppTheme.recording : AppTheme.accent)
+                if audioRecorder.isRecording {
+                    Text(Self.timerText(audioRecorder.recordingDuration))
+                        .font(.subheadline.weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(AppTheme.recording)
+                }
             }
         }
         .buttonStyle(.plain)
+    }
+
+    static func timerText(_ duration: TimeInterval) -> String {
+        let hours = Int(duration) / 3600
+        let minutes = (Int(duration) % 3600) / 60
+        let seconds = Int(duration) % 60
+        if hours > 0 { return String(format: "%d:%02d:%02d", hours, minutes, seconds) }
+        return String(format: "%d:%02d", minutes, seconds)
     }
 }
 

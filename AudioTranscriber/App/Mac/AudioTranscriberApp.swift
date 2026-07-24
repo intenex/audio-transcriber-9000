@@ -10,6 +10,7 @@ struct AudioTranscriberApp: App {
     @State private var speakerLibrary = SpeakerLibraryStore()
     @State private var liveTranscriber = LiveTranscriber()
     @State private var cloudSync = CloudSyncManager()
+    @State private var inputDevices = AudioInputDeviceStore()
 
     var body: some Scene {
         WindowGroup {
@@ -22,6 +23,7 @@ struct AudioTranscriberApp: App {
                 .environment(speakerLibrary)
                 .environment(liveTranscriber)
                 .environment(cloudSync)
+                .environment(inputDevices)
                 .onAppear {
                     AppBootstrap.wire(recordingStore: recordingStore,
                                       audioRecorder: audioRecorder,
@@ -31,6 +33,12 @@ struct AudioTranscriberApp: App {
                                       speakerLibrary: speakerLibrary,
                                       liveTranscriber: liveTranscriber,
                                       cloudSync: cloudSync)
+                    // Mac-only device selection: the recorder follows the
+                    // effective input, rotating segments on changes.
+                    audioRecorder.inputDeviceStore = inputDevices
+                    inputDevices.onEffectiveInputChanged = { [weak audioRecorder] in
+                        audioRecorder?.captureInputChanged()
+                    }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                     recordingStore.saveNow()

@@ -295,13 +295,28 @@ final class RecordingStore {
         }
     }
 
+    /// Crash salvage: adopt finalized-but-unmoved recordings left in the spool.
+    /// MUST never touch live capture files — the recorder streams the active
+    /// recording's segments (`<stem>.segN.<ext>`) there, and load() can run
+    /// mid-recording (cloud watcher reloads). Two guards: anything sharing the
+    /// active recording's stem is the recorder's, and anything modified in the
+    /// last 60 s is presumed live (a real crash leftover is stale by the next
+    /// load; a growing capture file's mtime is always fresh).
     private func sweepSpool() {
         guard let contents = try? FileManager.default.contentsOfDirectory(
-            at: SpoolLocation.directory, includingPropertiesForKeys: [.fileSizeKey]
+            at: SpoolLocation.directory,
+            includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey]
         ) else { return }
+        let activeStem = activeRecordingURL?.deletingPathExtension().lastPathComponent
         for url in contents {
             guard url != activeRecordingURL else { continue }
-            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            if let activeStem, url.lastPathComponent.hasPrefix(activeStem) { continue }
+            let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+            if let modified = values?.contentModificationDate,
+               Date().timeIntervalSince(modified) < 60 {
+                continue
+            }
+            let size = values?.fileSize ?? 0
             if size > 4096 {
                 _ = finalizeRecordingFile(at: url)
             } else {

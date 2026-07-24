@@ -78,6 +78,156 @@ enum AudioCompressor {
         }
     }
 
+    /// Concatenates finalized audio segments into ONE file (the recorder's
+    /// device-change recovery: each engine configuration writes its own
+    /// segment, stitched offline at stop). Segments may differ in sample rate
+    /// (an AirPods HFP mic runs at 24 kHz, the built-in mic at 48 kHz) — each
+    /// gets its own converter into the shared writer. Synchronous and heavy:
+    /// call off the main thread.
+    static func concatenateSync(segments: [URL], to destination: URL,
+                                as format: RecordingFormat) throws {
+        precondition(!segments.isEmpty, "no segments to concatenate")
+        try? FileManager.default.removeItem(at: destination)
+
+        // Target rate follows the first segment (the recording's original
+        // device); AAC caps at 48 kHz. Mono throughout — the recorder writes
+        // mono segments, and speech doesn't need more.
+        let firstInput: AVAudioFile
+        do {
+            firstInput = try AVAudioFile(forReading: segments[0])
+        } catch {
+            throw AudioCompressorError.cannotRead(error.localizedDescription)
+        }
+        let targetRate = min(firstInput.processingFormat.sampleRate, 48_000)
+        guard let pcmOutFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                               sampleRate: targetRate,
+                                               channels: 1, interleaved: false) else {
+            throw AudioCompressorError.cannotWrite("invalid stitch format")
+        }
+
+        let settings: [String: Any]
+        switch format {
+        case .wav:
+            settings = [
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVSampleRateKey: targetRate,
+                AVNumberOfChannelsKey: 1,
+                AVLinearPCMBitDepthKey: 16,
+                AVLinearPCMIsFloatKey: false,
+                AVLinearPCMIsBigEndianKey: false,
+                AVLinearPCMIsNonInterleaved: false,
+            ]
+        case .aacHigh, .aacCompact:
+            settings = [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: targetRate,
+                AVNumberOfChannelsKey: 1,
+                AVEncoderBitRateKey: format.bitrate ?? 96_000,
+            ]
+        }
+
+        do {
+            // Writer scoped: the container finalizes when the AVAudioFile is
+            // released, before this function returns.
+            try autoreleasepool {
+                let output = try AVAudioFile(forWriting: destination, settings: settings,
+                                             commonFormat: .pcmFormatFloat32, interleaved: false)
+                for (index, segmentURL) in segments.enumerated() {
+                    let input: AVAudioFile
+                    if index == 0 {
+                        input = firstInput
+                    } else {
+                        input = try AVAudioFile(forReading: segmentURL)
+                    }
+                    try appendConverted(input: input, to: output, pcmOutFormat: pcmOutFormat)
+                }
+            }
+        } catch let error as AudioCompressorError {
+            try? FileManager.default.removeItem(at: destination)
+            throw error
+        } catch {
+            try? FileManager.default.removeItem(at: destination)
+            throw AudioCompressorError.exportFailed(error.localizedDescription)
+        }
+    }
+
+    /// Windowed read → convert → write of one whole input into an open writer.
+    private static func appendConverted(input: AVAudioFile, to output: AVAudioFile,
+                                        pcmOutFormat: AVAudioFormat) throws {
+        let inputFormat = input.processingFormat
+        let needsConversion = inputFormat.sampleRate != pcmOutFormat.sampleRate
+            || inputFormat.channelCount != pcmOutFormat.channelCount
+            || inputFormat.commonFormat != .pcmFormatFloat32
+        var converter: AVAudioConverter? = nil
+        if needsConversion {
+            guard let c = AVAudioConverter(from: inputFormat, to: pcmOutFormat) else {
+                throw AudioCompressorError.cannotWrite("no converter from \(inputFormat)")
+            }
+            converter = c
+        }
+
+        let windowFrames = AVAudioFrameCount(windowSeconds * inputFormat.sampleRate)
+        guard let inBuffer = AVAudioPCMBuffer(pcmFormat: inputFormat, frameCapacity: windowFrames) else {
+            throw AudioCompressorError.cannotRead("couldn't allocate read buffer")
+        }
+        let outCapacity = AVAudioFrameCount(windowSeconds * pcmOutFormat.sampleRate * 1.2) + 4096
+        guard let outBuffer = AVAudioPCMBuffer(pcmFormat: pcmOutFormat, frameCapacity: outCapacity) else {
+            throw AudioCompressorError.cannotWrite("couldn't allocate write buffer")
+        }
+
+        func convertAndWrite(_ window: AVAudioPCMBuffer, endOfStream: Bool) throws {
+            guard let converter else {
+                if window.frameLength > 0 { try output.write(from: window) }
+                return
+            }
+            var fed = false
+            while true {
+                outBuffer.frameLength = 0
+                var conversionError: NSError?
+                let status = converter.convert(to: outBuffer, error: &conversionError) { _, outStatus in
+                    if fed {
+                        outStatus.pointee = endOfStream ? .endOfStream : .noDataNow
+                        return nil
+                    }
+                    fed = true
+                    if window.frameLength == 0 && endOfStream {
+                        outStatus.pointee = .endOfStream
+                        return nil
+                    }
+                    outStatus.pointee = .haveData
+                    return window
+                }
+                if let conversionError {
+                    throw AudioCompressorError.exportFailed(conversionError.localizedDescription)
+                }
+                if outBuffer.frameLength > 0 { try output.write(from: outBuffer) }
+                switch status {
+                case .haveData: continue
+                case .inputRanDry, .endOfStream: return
+                case .error: throw AudioCompressorError.exportFailed("converter error")
+                @unknown default: return
+                }
+            }
+        }
+
+        while input.framePosition < input.length {
+            inBuffer.frameLength = 0
+            do {
+                try input.read(into: inBuffer, frameCount: windowFrames)
+            } catch {
+                // A crashed segment's header may promise more frames than
+                // exist — keep what was readable rather than losing the rest.
+                NSLog("[AudioCompressor] segment read ended early: \(error.localizedDescription)")
+                break
+            }
+            if inBuffer.frameLength == 0 { break }
+            try convertAndWrite(inBuffer, endOfStream: false)
+        }
+        // Flush this segment's resampler tail before the next segment starts.
+        inBuffer.frameLength = 0
+        try convertAndWrite(inBuffer, endOfStream: true)
+    }
+
     private static func transcodeSync(source: URL, timeRange: CMTimeRange?,
                                       destination: URL, spec: Spec,
                                       progress: (@Sendable (Double) -> Void)?) throws {

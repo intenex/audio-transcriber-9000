@@ -3,6 +3,10 @@ import SwiftUI
 struct RecordingControlView: View {
     @Environment(AudioRecorder.self) private var audioRecorder
     @Environment(LiveTranscriber.self) private var liveTranscriber
+    #if os(macOS)
+    @Environment(AudioInputDeviceStore.self) private var inputDevices
+    @AppStorage("recordSystemAudio") private var recordSystemAudio = true
+    #endif
 
     var body: some View {
         VStack(spacing: 0) {
@@ -71,6 +75,10 @@ struct RecordingControlView: View {
                         .foregroundStyle(.tertiary)
                     #endif
                 }
+
+                #if os(macOS)
+                captureSourceControls
+                #endif
             }
 
             // Live transcript preview while recording
@@ -93,6 +101,57 @@ struct RecordingControlView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+
+    #if os(macOS)
+    /// Input picker + system-audio toggle (idle) / live source line (recording).
+    private var captureSourceControls: some View {
+        VStack(spacing: 10) {
+            if audioRecorder.isRecording {
+                if !audioRecorder.inputDescription.isEmpty {
+                    Label(audioRecorder.inputDescription, systemImage: "mic")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                @Bindable var inputDevices = inputDevices
+                HStack(spacing: 8) {
+                    Image(systemName: "mic")
+                        .foregroundStyle(.secondary)
+                    Picker("Microphone", selection: $inputDevices.selectedUID) {
+                        Text(automaticLabel).tag(String?.none)
+                        Divider()
+                        ForEach(inputDevices.devices) { device in
+                            Text(device.name).tag(String?.some(device.uid))
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: 320)
+                }
+                if inputDevices.isUsingFallback {
+                    Text("Selected microphone isn't connected — using \(inputDevices.systemDefault?.name ?? "the system default") instead")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.warning)
+                }
+                if SystemAudioCapture.isSupported {
+                    Toggle(isOn: $recordSystemAudio) {
+                        Text("Also record system audio (calls, videos)")
+                            .font(.subheadline)
+                    }
+                    .toggleStyle(.checkbox)
+                    .help("Captures what the Mac plays — the other side of a call in your AirPods, a video's soundtrack — mixed with the microphone. macOS asks for System Audio Recording permission once.")
+                }
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    private var automaticLabel: String {
+        if let name = inputDevices.systemDefault?.name {
+            return "Automatic — \(name)"
+        }
+        return "Automatic (system default)"
+    }
+    #endif
 
     private var livePreview: some View {
         ScrollViewReader { proxy in

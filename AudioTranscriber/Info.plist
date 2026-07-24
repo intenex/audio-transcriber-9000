@@ -20,6 +20,8 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Audio Transcriber 9000 can record what the Mac plays (the other side of calls, videos) alongside the microphone so nothing is missing from a transcript.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Audio Transcriber 9000 needs microphone access to record audio for transcription.</string>
 	<key>NSPrincipalClass</key>
