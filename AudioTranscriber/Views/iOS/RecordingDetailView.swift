@@ -202,7 +202,8 @@ struct RecordingDetailView: View {
                 ChatSessionView(context: .recording(recording))
             }
         case .failed:
-            FailedTranscriptionView(onRetry: { startTranscription(using: defaultEngineKind) })
+            FailedTranscriptionView(lastError: recording.lastError,
+                                    onRetry: { startTranscription(using: defaultEngineKind) })
         }
     }
 

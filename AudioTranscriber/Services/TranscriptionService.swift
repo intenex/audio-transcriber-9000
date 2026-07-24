@@ -56,6 +56,8 @@ final class TranscriptionService {
 
     /// Test hook: when set, used for every engine kind.
     var engineOverride: (any TranscriptionEngine)? = nil
+    /// Backoff before an automatic retry (test hook — tests shrink it).
+    var retryDelaySeconds: Double = 2
 
     func engine(for kind: TranscriptionEngineKind) -> (any TranscriptionEngine)? {
         if let engineOverride { return engineOverride }
@@ -79,7 +81,7 @@ final class TranscriptionService {
         guard !isActive(recordingID), queuePosition(of: recordingID) == nil else { return }
 
         requestNotificationAuthIfNeeded()
-        store.update(recordingID) { $0.status = .processing }
+        store.update(recordingID) { $0.status = .processing; $0.lastError = nil }
         queue.append(QueuedJob(recordingID: recordingID, engineKind: kind))
         startWorkerIfNeeded()
     }
@@ -144,8 +146,13 @@ final class TranscriptionService {
         }
     }
 
+    /// Transient engine failures (ANE inference hiccups, resource contention)
+    /// are common on hour-plus jobs; the chunk checkpoint makes retries cheap
+    /// because completed work is never redone.
+    private static let maxAttempts = 3
+
     private func run(_ job: QueuedJob) async {
-        guard let store, let recording = store.recording(with: job.recordingID) else { return }
+        guard let store, store.recording(with: job.recordingID) != nil else { return }
         guard let engine = engine(for: job.engineKind) else {
             store.update(job.recordingID) { $0.status = .failed }
             errorMessage = "\(job.engineKind.displayName) isn't configured. Add its API key in Settings."
@@ -157,42 +164,67 @@ final class TranscriptionService {
         progressPercent = 0
         etaText = nil
 
-        let knownSpeakers = speakerLibrary?.referenceCandidates(limit: 4) ?? []
-        let request = TranscriptionRequest(
-            recordingID: recording.id,
-            audioURL: recording.fileURL,
-            durationSeconds: recording.duration,
-            language: nil,
-            checkpointURL: recording.checkpointURL,
-            knownSpeakers: knownSpeakers
-        )
+        var attempt = 0
+        while true {
+            attempt += 1
+            // Re-fetch each attempt: the fileURL can change (compress-in-place).
+            guard let recording = store.recording(with: job.recordingID) else { break }
+            let knownSpeakers = speakerLibrary?.referenceCandidates(limit: 4) ?? []
+            let request = TranscriptionRequest(
+                recordingID: recording.id,
+                audioURL: recording.fileURL,
+                durationSeconds: recording.duration,
+                language: nil,
+                checkpointURL: recording.checkpointURL,
+                knownSpeakers: knownSpeakers
+            )
 
-        let task = Task { [weak self] () throws -> TranscriptionOutput in
-            try await engine.transcribe(request) { update in
-                Task { @MainActor [weak self] in
-                    guard let self, self.activeRecordingID == request.recordingID else { return }
-                    self.progress = update.message
-                    self.progressPercent = update.fractionComplete
-                    self.etaText = update.etaSeconds.map { ETAFormatter.string($0) }
+            let task = Task { [weak self] () throws -> TranscriptionOutput in
+                try await engine.transcribe(request) { update in
+                    Task { @MainActor [weak self] in
+                        guard let self, self.activeRecordingID == request.recordingID else { return }
+                        self.progress = update.message
+                        self.progressPercent = update.fractionComplete
+                        self.etaText = update.etaSeconds.map { ETAFormatter.string($0) }
+                    }
                 }
             }
-        }
-        jobTask = task
+            jobTask = task
 
-        do {
-            let output = try await task.value
-            try finish(recording: recording, output: output, engine: engine)
-            stopIntents[job.recordingID] = nil
-        } catch is CancellationError {
-            handleStop(job)
-        } catch {
-            // Engine may wrap the cancellation; honor an explicit stop intent first.
-            if stopIntents[job.recordingID] != nil {
+            do {
+                let output = try await task.value
+                try finish(recording: recording, output: output, engine: engine)
+                stopIntents[job.recordingID] = nil
+            } catch is CancellationError {
                 handleStop(job)
-            } else {
-                store.update(job.recordingID) { $0.status = .failed }
-                errorMessage = error.localizedDescription
+            } catch {
+                // Engine may wrap the cancellation; honor an explicit stop intent first.
+                if stopIntents[job.recordingID] != nil {
+                    handleStop(job)
+                } else if attempt < Self.maxAttempts {
+                    NSLog("[TranscriptionService] attempt %d/%d failed for %@: %@ — retrying from checkpoint",
+                          attempt, Self.maxAttempts, recording.displayName, String(describing: error))
+                    progress = "Attempt \(attempt) failed — retrying…"
+                    jobTask = nil
+                    try? await Task.sleep(for: .seconds(retryDelaySeconds))
+                    // A pause/cancel during the backoff must win.
+                    if stopIntents[job.recordingID] != nil {
+                        handleStop(job)
+                    } else {
+                        continue
+                    }
+                } else {
+                    NSLog("[TranscriptionService] giving up on %@ after %d attempts: %@",
+                          recording.displayName, attempt, String(describing: error))
+                    let detail = error.localizedDescription
+                    store.update(job.recordingID) {
+                        $0.status = .failed
+                        $0.lastError = detail
+                    }
+                    errorMessage = "Transcription failed after \(attempt) attempts: \(detail)"
+                }
             }
+            break
         }
         jobTask = nil
         activeRecordingID = nil
@@ -246,6 +278,7 @@ final class TranscriptionService {
             $0.transcriptionURL = recording.markdownURL
             $0.status = .done
             $0.engineUsed = attribution
+            $0.lastError = nil
         }
 
         notifyCompletion(recording: recording)

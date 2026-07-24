@@ -42,11 +42,14 @@ struct Recording: Identifiable, Codable {
     var engineUsed: String?
     /// Cached audio file size (refreshed at load/insert/compress).
     var fileSizeBytes: Int64?
+    /// Why the last transcription attempt failed (device-local diagnostic —
+    /// lives in the manifest cache, never in the synced .meta.json).
+    var lastError: String?
 
     init(id: UUID = UUID(), fileURL: URL, date: Date = .now, duration: TimeInterval = 0,
          transcriptionURL: URL? = nil, status: TranscriptionStatus = .pending,
          name: String? = nil, category: String? = nil, engineUsed: String? = nil,
-         fileSizeBytes: Int64? = nil) {
+         fileSizeBytes: Int64? = nil, lastError: String? = nil) {
         self.id = id
         self.fileURL = fileURL
         self.date = date
@@ -57,6 +60,7 @@ struct Recording: Identifiable, Codable {
         self.category = category
         self.engineUsed = engineUsed
         self.fileSizeBytes = fileSizeBytes
+        self.lastError = lastError
     }
 
     /// "M4A · 40 MB" style label for list rows and headers.

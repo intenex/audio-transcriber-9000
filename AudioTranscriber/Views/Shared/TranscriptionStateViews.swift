@@ -210,6 +210,7 @@ struct QueuedTranscriptionView: View {
 }
 
 struct FailedTranscriptionView: View {
+    var lastError: String? = nil
     let onRetry: () -> Void
 
     var body: some View {
@@ -224,6 +225,14 @@ struct FailedTranscriptionView: View {
             }
             Text("Transcription failed")
                 .font(.title3.weight(.medium))
+            if let lastError, !lastError.isEmpty {
+                Text(lastError)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 420)
+                    .textSelection(.enabled)
+            }
             Button(action: onRetry) {
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.counterclockwise")

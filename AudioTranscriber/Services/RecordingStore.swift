@@ -117,10 +117,34 @@ final class RecordingStore {
             }
         }
 
-        // Launch repair: a persisted .processing job was interrupted.
-        for idx in loaded.indices where loaded[idx].status == .processing {
-            let hasCheckpoint = FileManager.default.fileExists(atPath: loaded[idx].checkpointURL.path)
-            loaded[idx].status = hasCheckpoint ? .partial : .pending
+        // Launch repair: a persisted .processing job was interrupted mid-run,
+        // and .partial/.paused entries can go stale (their checkpoint is
+        // consumed by a later successful run). A checkpoint on disk means
+        // resumable work in flight; otherwise a completed transcript on disk
+        // is the truth — never demote a finished recording.
+        for idx in loaded.indices {
+            let recording = loaded[idx]
+            switch recording.status {
+            case .processing:
+                if FileManager.default.fileExists(atPath: recording.checkpointURL.path) {
+                    loaded[idx].status = .partial
+                } else if FileManager.default.fileExists(atPath: recording.markdownURL.path) {
+                    loaded[idx].status = .done
+                    loaded[idx].transcriptionURL = recording.markdownURL
+                } else {
+                    loaded[idx].status = .pending
+                }
+            case .partial, .paused:
+                guard !FileManager.default.fileExists(atPath: recording.checkpointURL.path) else { break }
+                if FileManager.default.fileExists(atPath: recording.markdownURL.path) {
+                    loaded[idx].status = .done
+                    loaded[idx].transcriptionURL = recording.markdownURL
+                } else {
+                    loaded[idx].status = .pending
+                }
+            default:
+                break
+            }
         }
 
         // Fill in missing file sizes (cheap stat calls, cached in the manifest).

@@ -403,7 +403,8 @@ struct TranscriptionView: View {
     }
 
     private var failedView: some View {
-        FailedTranscriptionView(onRetry: { startTranscription(using: defaultEngineKind) })
+        FailedTranscriptionView(lastError: recording.lastError,
+                                onRetry: { startTranscription(using: defaultEngineKind) })
     }
 
     private func interactiveTranscriptContent(_ segs: [TranscriptionSegment]) -> some View {
