@@ -4,7 +4,7 @@ What exists, how to run it, and what "verified" means in this project. See [DEVE
 
 ## Test suites (Tests/AudioTranscriberTests/, `@testable import AudioTranscriber`)
 
-**Unit — always run, no network, no models (200 on macOS / 204 on the iOS simulator as of 2026-07-18):**
+**Unit — always run, no network, no models (213 on macOS / 216 on the iOS simulator as of 2026-07-24; totals incl. skipped gated suites: 224 / 221):**
 
 | Suite | Covers |
 |---|---|
@@ -13,7 +13,9 @@ What exists, how to run it, and what "verified" means in this project. See [DEVE
 | `RecordingStoreTests` | manifest round-trip, legacy UserDefaults migration, orphan adoption, crash-artifact skip, status repair, category rename-merge/delete cascades, sidecar deletion, tolerant status decode |
 | `RecordingMetaTests` | `.meta.json` sidecar: written on insert/change (no-op updates leave the file byte-identical), **library reconstructs from the directory alone with stable UUIDs/names/categories** after deleting recordings.json, external (synced-in) meta edits win on reload, legacy-library backfill, delete cleanup |
 | `CheckpointRelocationTests` | checkpoint path is ID-keyed under Application Support (never inside the library), legacy `<stem>.partial.json` migrates at load and launch repair sees it, delete cleans the relocated file. Tests that write real checkpoints must clean up (the location is global) |
-| `SpoolTests` | finalize moves a spool file into the library; launch sweep salvages crash leftovers (>4 KB) and deletes stubs; the sweep never touches `store.activeRecordingURL` (the live recording) |
+| `SpoolTests` | finalize moves a spool file into the library; launch sweep salvages STALE crash leftovers (>4 KB, mtime >60 s) and deletes stubs; the sweep never touches the active recording, its `<stem>.segN` segments, or any freshly modified file (cross-instance protection) |
+| `TranscriptionRetryTests` | auto-retry: 2 transient engine failures retried through to `.done` (exactly 3 attempts), persistent failure gives up after 3 with `lastError` persisted + cleared on re-enqueue, cancel during backoff wins; launch repair promotes stale `.processing/.partial/.paused` with a transcript and no checkpoint to `.done`, keeps `.partial` when a checkpoint exists, `.pending` when nothing on disk |
+| `SegmentStitchTests` | `AudioCompressor.concatenateSync`: same-rate and MIXED-rate (24 k AirPods HFP + 48 k built-in) segments stitch to combined duration, output follows the first segment's rate, WAV output path, single-segment identity; `AudioInputDeviceStore.resolveEffective` policy (Automatic / pinned / disconnected-pinned fallback) |
 | `ImportURLsTests` | platform-neutral import API: copy vs compress-to-m4a, compress flag ignored for already-compressed sources, always/never/ask policy resolution, estimate counts only compressibles |
 | `ConflictMergeTests` | sync conflict policies: meta LWW by updatedAt, speaker-name union w/ newer-file-wins, category union, per-speaker library merge by id (clips/embeddings/recordingIDs union) |
 | `CloudModeStoreTests` | cloud-mode store: storage dir resolves to the container, manifest cache stays OUT of the synced tree, evicted placeholder rows survive load via .meta.json and delete removes the stub |
@@ -46,6 +48,8 @@ rm /tmp/audiotranscriber-integration-tests
 
 > Why a marker file: `TEST_RUNNER_`-prefixed env vars do **not** reach the hosted test bundle on this setup — don't waste time on that path again.
 
+> **Quit any running Audio Transcriber 9000 instance before gated recorder tests.** Tests run inside a fully live app (AppBootstrap wires the real stores), and a SECOND running instance shares the global spool: its cloud-watcher reloads sweep the spool and once adopted the test recorder's live segment files into the user's REAL iCloud library mid-test (0-bytes-on-disk failures, junk `segN.m4a` files in the container). The sweep now has stem + mtime guards, but an old binary (e.g. a stale /Applications copy) predates them.
+
 | Test | Proves | Baseline (M1 Max, 2026-07) |
 |---|---|---|
 | `LocalEngineIntegrationTests` | Full local pipeline on the repo's 63 s 2-speaker fixture (`test_recording.wav`): segments, **exactly 2 speakers**, monotonic word times, embeddings returned, RTF recorded | 2.4 s warm |
@@ -53,7 +57,8 @@ rm /tmp/audiotranscriber-integration-tests
 | `LongFileSmokeTests` (2 h) | The real 2 h 07 m / 1.4 GB recording end-to-end (read-only on the source; checkpoint in temp): 43 chunks, 247 segments, 9 695 words, 2 speakers, 100 % coverage | 142 s (53×) |
 | `LongFileSmokeTests` (5 h) | The real 4 h 56 m / **3.4 GB** recording — the file whose >2 GB payload crashed the old single-shot loader with error -40: 99 chunks, 544 segments, 100 % coverage via `WindowedAudioLoader` | 362 s (49×) |
 | `DiarizerThresholdSweepTests` | Tuning harness: speaker count per clusteringThreshold on the fixture (0.85 ⇒ 2 ✓) | ~10 s |
-| `RecorderSpoolIntegrationTests` | Real-mic record flow: live file streams into the spool (never the library), stop finalizes the container and renames it into the library with header-verified duration, spool left clean | ~5 s |
+| `RecorderSpoolIntegrationTests` | Real-mic record flow: live file streams into the spool (never the library), stop finalizes the container and renames it into the library with header-verified duration, spool left clean. Second test drives the REAL capture-interruption path (`captureInputChanged` mid-recording): segment rotates, recording continues, stop stitches both halves (≥3.5 s of 5 s wall), segments cleaned. Forces `recordSystemAudio=false` for the run (no TCC prompt unattended) and restores it | ~10 s |
+| `DiagnosticTranscribeTests` | On-demand forensics harness: writes an audio path into `/tmp/audiotranscriber-diagnose-file`, then `-only-testing:` this suite to run the full local pipeline on ANY file with a scratch checkpoint (never touches real sidecars). Used to reproduce user-reported failures with real models | file-dependent |
 | `RealICloudSmokeTests` (Mac, needs full signing + iCloud account) | Migrates a SCRATCH library into the REAL ubiquity container with the real ICloudSyncEngine (compress → copy → verify → repoint; engine reports uploading/current), disable returns to local, all scratch files removed from the container. Isolated defaults — the user's library/settings untouched | ~1 s |
 
 Long real samples referenced by the integration tests live in `~/Documents/AudioTranscriber/` (tests `XCTSkip` when absent).
