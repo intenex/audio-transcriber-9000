@@ -1,3 +1,4 @@
+import AVFoundation
 import XCTest
 @testable import AudioTranscriber
 
@@ -168,6 +169,53 @@ final class RecorderSpoolIntegrationTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: recording.fileURL.path))
         XCTAssertGreaterThan(RecordingStore.audioDuration(for: recording.fileURL), 2,
                              "the captured audio survives the auto-stop")
+    }
+
+    /// The capture path is actually live: a real room is never digitally
+    /// silent, so an all-zero file means denied microphone permission or a dead
+    /// input. This is the check that says "recording works on THIS device"
+    /// (it caught nothing on the Mac; it exists for real iPhone runs).
+    func testMicrophoneCapturesRealSignal() async throws {
+        try XCTSkipUnless(enabled, "marker file not present")
+
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("RecSignal-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let restore = forceMicOnlyCapture()
+        defer { restore() }
+
+        let store = RecordingStore(storageDirectory: tempDir,
+                                   defaults: UserDefaults(suiteName: "RecSignal-\(UUID().uuidString)")!)
+        store.load()
+        let recorder = AudioRecorder()
+        recorder.attach(store: store)
+
+        recorder.startRecording()
+        for _ in 0..<40 where !recorder.isRecording {
+            try await Task.sleep(for: .milliseconds(250))
+        }
+        XCTAssertTrue(recorder.isRecording, "recording never started — mic permission?")
+        try await Task.sleep(for: .seconds(3))
+        let recording = try XCTUnwrap(recorder.stopRecording())
+
+        let file = try AVAudioFile(forReading: recording.fileURL)
+        let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 8_192)!
+        var loudestPeak = AudioLevel.minimumDB
+        var loudestRMS = AudioLevel.minimumDB
+        while file.framePosition < file.length {
+            let remaining = file.length - file.framePosition
+            let frames = AVAudioFrameCount(min(AVAudioFramePosition(8_192), remaining))
+            guard frames > 0 else { break }
+            try file.read(into: buffer, frameCount: frames)
+            if buffer.frameLength == 0 { break }
+            let (rms, peak) = AudioLevel.levels(of: buffer)
+            loudestPeak = max(loudestPeak, peak)
+            loudestRMS = max(loudestRMS, rms)
+        }
+        print("[recorder] captured 3 s at peak \(loudestPeak) dBFS / rms \(loudestRMS) dBFS")
+        XCTAssertGreaterThan(loudestPeak, -100,
+                             "the recording is digital silence — microphone permission denied or the input is dead")
     }
 
     /// Before treating silence as an empty room, the recorder reopens the
