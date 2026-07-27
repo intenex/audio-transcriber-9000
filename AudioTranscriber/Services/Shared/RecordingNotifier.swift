@@ -85,13 +85,14 @@ final class RecordingNotifier: NSObject {
         UNUserNotificationCenter.current().add(request) { _ in }
     }
 
-    /// "2h 5m" / "45m" — compact enough for a banner title line.
+    /// "2h 5m" / "45m" / "22s" — compact enough for a banner title line.
     static func durationText(_ seconds: TimeInterval) -> String {
         let total = Int(seconds.rounded())
         let hours = total / 3600
         let minutes = (total % 3600) / 60
         if hours > 0 { return "\(hours)h \(minutes)m" }
-        return "\(minutes)m"
+        if minutes > 0 { return "\(minutes)m" }
+        return "\(total)s"
     }
 }
 

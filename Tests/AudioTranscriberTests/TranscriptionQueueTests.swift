@@ -166,6 +166,9 @@ final class TranscriptionQueueTests: XCTestCase {
 
     func testFailureSetsFailedStatus() async {
         let recording = addRecording("failme")
+        // Give-up takes all 3 attempts; the backoff itself is TranscriptionRetryTests'
+        // subject, and at the shipping 2 s it eats the whole wait budget here.
+        service.retryDelaySeconds = 0.05
         service.engineOverride = MockTranscriptionEngine { _ in
             throw TranscriptionEngineError.engineFailure("boom")
         }

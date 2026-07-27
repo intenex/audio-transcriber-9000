@@ -50,7 +50,12 @@ struct RecordingCheckInAlert: ViewModifier {
         content
             .alert("Still recording?",
                    isPresented: .constant(enabled && audioRecorder.pendingCheckIn != nil)) {
-                Button("Keep Recording") { audioRecorder.acknowledgeCheckIn() }
+                // "Keep Recording" carries the cancel role on purpose: without
+                // one, SwiftUI synthesizes its own Cancel button that would
+                // dismiss the alert without answering (and, against a constant
+                // binding, leave it stuck re-presenting). Escaping the alert
+                // must mean "keep going" — never end a live recording.
+                Button("Keep Recording", role: .cancel) { audioRecorder.acknowledgeCheckIn() }
                 Button("Stop & Save", role: .destructive) { audioRecorder.stopRecordingFromCheckIn() }
             } message: {
                 Text("This recording has been running for \(RecordingNotifier.durationText(audioRecorder.pendingCheckIn?.elapsed ?? 0)).")
