@@ -27,6 +27,7 @@ struct RecordSheet: View {
                     }
                 }
         }
+        .recordingCheckInAlert()
         .interactiveDismissDisabled(audioRecorder.isRecording)
     }
 }

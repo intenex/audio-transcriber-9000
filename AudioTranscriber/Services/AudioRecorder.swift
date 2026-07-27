@@ -30,6 +30,14 @@ final class AudioRecorder: NSObject {
     private(set) var inputDescription: String = ""
     /// True while a stopped multi-segment recording is being stitched.
     private(set) var isFinalizingRecording = false
+    /// Set when a long recording asks the user whether to keep going.
+    var pendingCheckIn: CheckInPrompt? = nil
+
+    /// "You've been recording for 2h — keep going?" (see RecordingGuardrails).
+    struct CheckInPrompt: Identifiable, Equatable {
+        let id = UUID()
+        let elapsed: TimeInterval
+    }
 
     private weak var store: RecordingStore?
     /// Live transcript preview sink (optional; fed from the tap callback).
@@ -57,6 +65,19 @@ final class AudioRecorder: NSObject {
     // Watchdog: written-frame growth tracking
     private var lastObservedLength: AVAudioFramePosition = 0
     private var lastGrowthDate = Date()
+
+    // Unattended-recording guardrails (docs/ARCHITECTURE.md)
+    private var levelMonitor: RecordingLevelMonitor?
+    private var checkIn = LongRecordingCheckIn()
+    private var guardrailConfig: SilenceDetector.Config = .default
+    private var silenceRecoveryAttempts = 0
+    /// The monitor's last-sound time when the most recent recovery ran.
+    private var recoveryBaselineSoundTime: TimeInterval = 0
+    /// True while rotating capture *because* of silence (see evaluateGuardrails).
+    private var isSilenceRecovery = false
+    /// Test hooks: bypass the UserDefaults-configured limits.
+    var silenceConfigOverride: SilenceDetector.Config? = nil
+    var checkInIntervalOverride: TimeInterval? = nil
 
     var recordSystemAudioPreference: Bool {
         get { UserDefaults.standard.object(forKey: "recordSystemAudio") as? Bool ?? true }
@@ -142,6 +163,16 @@ final class AudioRecorder: NSObject {
         #endif
 
         activeFormat = RecordingFormat.selected
+        // Guardrails against a forgotten recording: silence auto-stop and the
+        // periodic "still recording?" check-in.
+        guardrailConfig = silenceConfigOverride ?? .fromDefaults()
+        levelMonitor = RecordingLevelMonitor(config: guardrailConfig, start: Date())
+        checkIn = checkInIntervalOverride.map { LongRecordingCheckIn(interval: $0) }
+            ?? .fromDefaults()
+        silenceRecoveryAttempts = 0
+        pendingCheckIn = nil
+        RecordingNotifier.shared.requestAuthorizationIfNeeded()
+
         let filename = "recording_\(dateString()).\(activeFormat.fileExtension)"
         // Record into the device-local spool; the file moves into the library
         // only after the container is finalized at stop (sync safety).
@@ -193,6 +224,7 @@ final class AudioRecorder: NSObject {
         let wantSystemAudio = recordSystemAudioPreference && SystemAudioCapture.isSupported
         #endif
         let live = liveTranscriber
+        let monitor = levelMonitor
         let health = TapHealth()
         let onTapDead: @Sendable () -> Void = { [weak self] in
             Task { @MainActor [weak self] in
@@ -239,7 +271,8 @@ final class AudioRecorder: NSObject {
 
             do {
                 let file = try await Self.installCapture(on: engine, writingTo: segmentURL, format: format,
-                                                         live: live, health: health, onTapDead: onTapDead)
+                                                         live: live, monitor: monitor, health: health,
+                                                         onTapDead: onTapDead)
                 return (engine, file, capture, description)
             } catch {
                 capture?.deactivate()
@@ -251,7 +284,8 @@ final class AudioRecorder: NSObject {
             () async throws -> (AVAudioEngine, AVAudioFile, String) in
             let engine = AVAudioEngine()
             let file = try await Self.installCapture(on: engine, writingTo: segmentURL, format: format,
-                                                     live: live, health: health, onTapDead: onTapDead)
+                                                     live: live, monitor: monitor, health: health,
+                                                     onTapDead: onTapDead)
             return (engine, file, "Microphone")
         }.value
         #endif
@@ -277,6 +311,12 @@ final class AudioRecorder: NSObject {
         segmentURLs.append(segmentURL)
         lastObservedLength = 0
         lastGrowthDate = Date()
+        // The gap between segments was never measured, and the new device has
+        // its own noise floor — restart the silence clock. The exception is a
+        // rotation the silence rule itself requested: that clock must keep
+        // running, or repeated recovery attempts would defer the limit forever.
+        levelMonitor?.captureRestarted(resetSilenceClock: !isSilenceRecovery)
+        isSilenceRecovery = false
         installConfigObserver(for: engine)
         NSLog("[AudioRecorder] Capture segment \(segmentIndex) started (\(description))")
     }
@@ -286,7 +326,8 @@ final class AudioRecorder: NSObject {
     /// float arithmetic only — never an AVAudioConverter (historic crash).
     private static func installCapture(on engine: AVAudioEngine, writingTo url: URL,
                                        format: RecordingFormat, live: LiveTranscriber?,
-                                       health: TapHealth, onTapDead: @escaping @Sendable () -> Void)
+                                       monitor: RecordingLevelMonitor?, health: TapHealth,
+                                       onTapDead: @escaping @Sendable () -> Void)
         async throws -> AVAudioFile {
         let inputNode = engine.inputNode
         let inputFormat = inputNode.outputFormat(forBus: 0)
@@ -332,6 +373,11 @@ final class AudioRecorder: NSObject {
             if channels > 1 {
                 for i in 0..<frames { out[i] = max(-1.0, min(1.0, out[i])) }
             }
+
+            // Level metering for the silence guardrail, measured on exactly
+            // what lands in the file (vDSP; no allocation, no locking beyond
+            // the monitor's own).
+            monitor?.observe(buffer: monoBuffer)
 
             do {
                 try file.write(from: monoBuffer)
@@ -448,6 +494,9 @@ final class AudioRecorder: NSObject {
 
         stopTimer()
         sleepGuard = nil
+        levelMonitor = nil
+        pendingCheckIn = nil
+        RecordingNotifier.shared.clearCheckIn()
         liveTranscriber?.stop()
         #if os(iOS)
         AudioSessionController.shared.endRecordingSession()
@@ -522,6 +571,90 @@ final class AudioRecorder: NSObject {
         }
         return nil
     }
+
+    // MARK: - Unattended-recording guardrails
+
+    /// Runs once a second while recording. Two independent limits:
+    ///
+    /// * nothing captured for `silenceAutoStopMinutes` (20 by default) →
+    ///   stop AND SAVE, with a notification, so a forgotten recording can't run
+    ///   for days. The detector needs an unbroken stretch of silence — one
+    ///   buffer with sound in it resets the clock (see SilenceDetector).
+    /// * every `longRecordingCheckInHours` (2 by default) → ask whether to keep
+    ///   going. An unanswered check-in never stops anything by itself; only the
+    ///   user or the silence rule ends a recording that is capturing audio.
+    @MainActor
+    private func evaluateGuardrails() {
+        guard isRecording, !isRebuildingCapture, let monitor = levelMonitor else { return }
+        let silence = monitor.silenceDuration()
+        // Sound arrived after the last recovery attempt (reopening the input
+        // worked, or the room simply came back to life) — re-arm the attempts.
+        // Compared against the monitor's own clock, not a wall-clock guess, so
+        // this holds for any recovery delay.
+        if silenceRecoveryAttempts > 0, monitor.lastSoundTime > recoveryBaselineSoundTime {
+            silenceRecoveryAttempts = 0
+        }
+
+        // A dead-but-still-writing input (the mic stops delivering signal while
+        // the file keeps growing with zeros) looks exactly like silence. Try
+        // reopening the device before treating it as an empty room; capture
+        // rotation is the same path a device change uses.
+        // Attempts are spaced one delay apart (120 s, 240 s, 360 s by default)
+        // so a reopened device gets time to prove itself, and the silence clock
+        // keeps running through them — recovery can't postpone the limit.
+        if guardrailConfig.silenceRecoveryDelay > 0,
+           silenceRecoveryAttempts < guardrailConfig.maxSilenceRecoveryAttempts,
+           silence >= guardrailConfig.silenceRecoveryDelay * Double(silenceRecoveryAttempts + 1) {
+            silenceRecoveryAttempts += 1
+            recoveryBaselineSoundTime = monitor.lastSoundTime
+            NSLog("[AudioRecorder] Silent for \(Int(silence))s — rebuilding capture (attempt \(silenceRecoveryAttempts))")
+            isSilenceRecovery = true
+            handleCaptureFailure(reason: "no sound was reaching the input")
+            return
+        }
+
+        if monitor.shouldAutoStop() {
+            let minutes = Int((monitor.silenceDuration() / 60).rounded())
+            NSLog("[AudioRecorder] Auto-stopping: no sound captured for \(minutes) min")
+            pendingCheckIn = nil
+            RecordingNotifier.shared.clearCheckIn()
+            stopRecording()
+            let message = "Recording stopped automatically: nothing was captured for \(minutes) minutes. Everything recorded before that has been saved."
+            errorMessage = message
+            RecordingNotifier.shared.postAutoStopped(message: message)
+            return
+        }
+
+        if pendingCheckIn == nil, checkIn.isDue(at: recordingDuration) {
+            NSLog("[AudioRecorder] Long-recording check-in at \(Int(recordingDuration))s")
+            pendingCheckIn = CheckInPrompt(elapsed: recordingDuration)
+            RecordingNotifier.shared.postCheckIn(elapsed: recordingDuration)
+        }
+    }
+
+    /// "Keep Recording" — from the in-app alert or the notification action.
+    @MainActor
+    func acknowledgeCheckIn() {
+        pendingCheckIn = nil
+        checkIn.acknowledged(at: recordingDuration)
+        RecordingNotifier.shared.clearCheckIn()
+    }
+
+    /// "Stop & Save" — from the in-app alert or the notification action.
+    @MainActor
+    func stopRecordingFromCheckIn() {
+        pendingCheckIn = nil
+        RecordingNotifier.shared.clearCheckIn()
+        stopRecording()
+    }
+
+    /// Seconds since the last buffer that contained sound (0 when not recording).
+    var silenceDuration: TimeInterval {
+        levelMonitor?.silenceDuration() ?? 0
+    }
+
+    /// Capture segments opened for the current recording (1 = uninterrupted).
+    var segmentCount: Int { segmentURLs.count }
 
     // MARK: - Playback
 
@@ -628,6 +761,9 @@ final class AudioRecorder: NSObject {
                         }
                     }
                 }
+                // Unattended-recording guardrails (queued after any capture
+                // rebuild above, which they then skip).
+                Task { @MainActor [weak self] in self?.evaluateGuardrails() }
             }
 
             // WAV's 32-bit header caps files at 4 GB — check every ~10s.

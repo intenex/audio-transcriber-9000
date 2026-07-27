@@ -52,6 +52,9 @@ enum AppBootstrap {
                 transcriptionService?.enqueue(id)
             }
         }
+        // Owns the notification-center delegate: the long-recording check-in
+        // banner's Keep/Stop actions route back into the recorder.
+        RecordingNotifier.shared.activate(recorder: audioRecorder)
         audioRecorder.requestMicPermission()
         modelManager.refreshStatus()
         Task { await chatService.checkLocalAvailability() }

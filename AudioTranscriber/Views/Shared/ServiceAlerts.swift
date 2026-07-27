@@ -30,11 +30,40 @@ struct ServiceAlertsModifier: ViewModifier {
             } message: {
                 Text(store.infoMessage ?? "")
             }
+            #if os(macOS)
+            // One window, no competing sheets — the root can own this alert.
+            // iOS attaches it per-screen instead (a fullScreenCover would
+            // swallow a root-level presentation).
+            .recordingCheckInAlert()
+            #endif
+    }
+}
+
+/// "You've been recording for 2h — keep going?" The same question the
+/// notification banner asks, for when the app IS in front.
+struct RecordingCheckInAlert: ViewModifier {
+    @Environment(AudioRecorder.self) private var audioRecorder
+    /// False on screens that are currently covered by another presentation.
+    var enabled: Bool = true
+
+    func body(content: Content) -> some View {
+        content
+            .alert("Still recording?",
+                   isPresented: .constant(enabled && audioRecorder.pendingCheckIn != nil)) {
+                Button("Keep Recording") { audioRecorder.acknowledgeCheckIn() }
+                Button("Stop & Save", role: .destructive) { audioRecorder.stopRecordingFromCheckIn() }
+            } message: {
+                Text("This recording has been running for \(RecordingNotifier.durationText(audioRecorder.pendingCheckIn?.elapsed ?? 0)).")
+            }
     }
 }
 
 extension View {
     func serviceAlerts() -> some View {
         modifier(ServiceAlertsModifier())
+    }
+
+    func recordingCheckInAlert(enabled: Bool = true) -> some View {
+        modifier(RecordingCheckInAlert(enabled: enabled))
     }
 }

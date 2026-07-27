@@ -46,6 +46,14 @@ struct RecordingControlView: View {
                     .contentTransition(.numericText())
                     .animation(.default, value: timerString)
 
+                // Silence guardrail: visible well before it acts, so an
+                // auto-stop is never a surprise.
+                if audioRecorder.isRecording, let silence = silenceWarning {
+                    Label(silence, systemImage: "speaker.slash")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 // Record button
                 Button(action: toggleRecording) {
                     HStack(spacing: 8) {
@@ -195,6 +203,14 @@ struct RecordingControlView: View {
         let s = Int(duration) % 60
         let ms = Int((duration.truncatingRemainder(dividingBy: 1)) * 10)
         return String(format: "%02d:%02d.%d", m, s, ms)
+    }
+
+    /// Warning text once the mic has been quiet for a few minutes; nil while
+    /// sound is arriving normally.
+    private var silenceWarning: String? {
+        let silence = audioRecorder.silenceDuration
+        guard silence >= 180 else { return nil }
+        return "No sound for \(Int(silence / 60)) min — recording stops automatically at \(Int(SilenceDetector.Config.fromDefaults().silenceLimit / 60)) min of silence"
     }
 
     private func toggleRecording() {

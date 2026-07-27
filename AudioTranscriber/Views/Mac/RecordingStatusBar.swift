@@ -32,6 +32,15 @@ struct RecordingStatusBar: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
+                // Silence guardrail countdown — an auto-stop should never be
+                // the first the user hears of it.
+                if audioRecorder.silenceDuration >= 180 {
+                    Label("no sound for \(Int(audioRecorder.silenceDuration / 60)) min",
+                          systemImage: "speaker.slash")
+                        .font(.subheadline)
+                        .foregroundStyle(.orange)
+                        .lineLimit(1)
+                }
 
                 Spacer(minLength: 12)
 

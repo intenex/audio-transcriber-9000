@@ -8,9 +8,9 @@ import XCTest
 @MainActor
 final class RecorderSpoolIntegrationTests: XCTestCase {
 
-    private var enabled: Bool {
-        FileManager.default.fileExists(atPath: "/tmp/audiotranscriber-integration-tests")
-    }
+    /// Also satisfiable inside the iOS app container so these run on a real
+    /// phone (see IntegrationGate).
+    private var enabled: Bool { IntegrationGate.isEnabled }
 
     func testRecordingSpoolsThenLandsInLibrary() async throws {
         try XCTSkipUnless(enabled, "marker file not present")
@@ -119,5 +119,173 @@ final class RecorderSpoolIntegrationTests: XCTestCase {
         let spoolLeftovers = (try? FileManager.default.contentsOfDirectory(atPath: SpoolLocation.directory.path)) ?? []
         XCTAssertTrue(spoolLeftovers.filter { $0.contains(".seg") }.isEmpty,
                       "segments cleaned up after stitch: \(spoolLeftovers)")
+    }
+
+    /// Silence guardrail, end to end on the real capture path: with thresholds
+    /// that treat every possible input as silence, a live recording must stop
+    /// itself after the limit AND land in the library — stop-and-SAVE, never
+    /// stop-and-discard.
+    func testSilenceGuardrailStopsAndSavesTheRecording() async throws {
+        try XCTSkipUnless(enabled, "marker file not present")
+
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("RecSilence-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let restore = forceMicOnlyCapture()
+        defer { restore() }
+
+        let store = RecordingStore(storageDirectory: tempDir,
+                                   defaults: UserDefaults(suiteName: "RecSilence-\(UUID().uuidString)")!)
+        store.load()
+        let recorder = AudioRecorder()
+        recorder.attach(store: store)
+        // Nothing can clear these bars, so whatever the room sounds like the
+        // recorder sees uninterrupted silence — the wiring is what's under test.
+        var config = SilenceDetector.Config.default
+        config.silenceLimit = 4
+        config.alwaysSoundRMSDB = 0
+        config.alwaysSoundPeakDB = 0
+        config.audibleFloorDB = 0
+        recorder.silenceConfigOverride = config
+
+        recorder.startRecording()
+        for _ in 0..<40 where !recorder.isRecording {
+            try await Task.sleep(for: .milliseconds(250))
+        }
+        XCTAssertTrue(recorder.isRecording, "recording never started — mic permission?")
+
+        for _ in 0..<40 where recorder.isRecording {
+            try await Task.sleep(for: .milliseconds(500))
+        }
+        XCTAssertFalse(recorder.isRecording, "silence guardrail never fired")
+        XCTAssertNotNil(recorder.errorMessage, "the auto-stop must explain itself")
+
+        for _ in 0..<40 where store.recordings.isEmpty {
+            try await Task.sleep(for: .milliseconds(250))
+        }
+        let recording = try XCTUnwrap(store.recordings.first, "auto-stopped audio must still be saved")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: recording.fileURL.path))
+        XCTAssertGreaterThan(RecordingStore.audioDuration(for: recording.fileURL), 2,
+                             "the captured audio survives the auto-stop")
+    }
+
+    /// Before treating silence as an empty room, the recorder reopens the
+    /// input — the failure two of the user's real recordings show (47 min and
+    /// 113 min of all-zero samples) is a live-but-dead input, and rotating the
+    /// capture chain is the one thing that can revive it. Recovery must keep
+    /// the recording running, and is capped so a quiet room can't churn.
+    func testSilenceTriggersCaptureRecoveryBeforeStopping() async throws {
+        try XCTSkipUnless(enabled, "marker file not present")
+
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("RecRevive-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let restore = forceMicOnlyCapture()
+        defer { restore() }
+
+        let store = RecordingStore(storageDirectory: tempDir,
+                                   defaults: UserDefaults(suiteName: "RecRevive-\(UUID().uuidString)")!)
+        store.load()
+        let recorder = AudioRecorder()
+        recorder.attach(store: store)
+        var config = SilenceDetector.Config.default
+        config.alwaysSoundRMSDB = 0        // nothing can register as sound
+        config.alwaysSoundPeakDB = 0
+        config.audibleFloorDB = 0
+        config.silenceRecoveryDelay = 2
+        config.maxSilenceRecoveryAttempts = 2
+        config.silenceLimit = 60           // far enough out to observe recovery first
+        recorder.silenceConfigOverride = config
+
+        recorder.startRecording()
+        for _ in 0..<40 where !recorder.isRecording {
+            try await Task.sleep(for: .milliseconds(250))
+        }
+        XCTAssertTrue(recorder.isRecording, "recording never started — mic permission?")
+
+        for _ in 0..<40 where recorder.segmentCount < 3 {
+            try await Task.sleep(for: .milliseconds(500))
+        }
+        XCTAssertEqual(recorder.segmentCount, 3, "two recovery rotations, then no more")
+        XCTAssertTrue(recorder.isRecording, "recovery must not end the recording")
+
+        // Capped: no further rotations even though silence continues.
+        try await Task.sleep(for: .seconds(6))
+        XCTAssertEqual(recorder.segmentCount, 3, "recovery attempts must be capped")
+        XCTAssertTrue(recorder.isRecording)
+
+        recorder.stopRecording()
+        for _ in 0..<60 where recorder.isFinalizingRecording || store.recordings.isEmpty {
+            try await Task.sleep(for: .milliseconds(250))
+        }
+        let recording = try XCTUnwrap(store.recordings.first, "every segment is still saved")
+        XCTAssertGreaterThan(RecordingStore.audioDuration(for: recording.fileURL), 5)
+    }
+
+    /// The 2-hour check-in, driven at test speed: it fires, "Keep Recording"
+    /// clears it and pushes the next one out, and the recording keeps running
+    /// throughout.
+    func testLongRecordingCheckInFiresAndCanBeAcknowledged() async throws {
+        try XCTSkipUnless(enabled, "marker file not present")
+
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("RecCheckIn-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let restore = forceMicOnlyCapture()
+        defer { restore() }
+
+        let store = RecordingStore(storageDirectory: tempDir,
+                                   defaults: UserDefaults(suiteName: "RecCheckIn-\(UUID().uuidString)")!)
+        store.load()
+        let recorder = AudioRecorder()
+        recorder.attach(store: store)
+        recorder.checkInIntervalOverride = 3
+
+        recorder.startRecording()
+        for _ in 0..<40 where !recorder.isRecording {
+            try await Task.sleep(for: .milliseconds(250))
+        }
+        XCTAssertTrue(recorder.isRecording, "recording never started — mic permission?")
+
+        for _ in 0..<20 where recorder.pendingCheckIn == nil {
+            try await Task.sleep(for: .milliseconds(500))
+        }
+        XCTAssertNotNil(recorder.pendingCheckIn, "check-in never fired")
+        XCTAssertTrue(recorder.isRecording, "a check-in must not stop the recording")
+
+        recorder.acknowledgeCheckIn()
+        XCTAssertNil(recorder.pendingCheckIn)
+        // Acknowledging pushes the next one a full interval out.
+        try await Task.sleep(for: .milliseconds(1_500))
+        XCTAssertNil(recorder.pendingCheckIn, "check-in re-fired too soon")
+        XCTAssertTrue(recorder.isRecording)
+
+        for _ in 0..<20 where recorder.pendingCheckIn == nil {
+            try await Task.sleep(for: .milliseconds(500))
+        }
+        XCTAssertNotNil(recorder.pendingCheckIn, "the next check-in must arrive")
+        XCTAssertTrue(recorder.isRecording, "unanswered check-ins never stop a recording")
+
+        recorder.stopRecordingFromCheckIn()
+        XCTAssertFalse(recorder.isRecording)
+        XCTAssertNil(recorder.pendingCheckIn)
+    }
+
+    /// Mic-only for unattended runs: the system-audio tap would raise a TCC
+    /// prompt. Returns the restore closure.
+    private func forceMicOnlyCapture() -> () -> Void {
+        let key = "recordSystemAudio"
+        let previous = UserDefaults.standard.object(forKey: key)
+        UserDefaults.standard.set(false, forKey: key)
+        return {
+            if let previous {
+                UserDefaults.standard.set(previous, forKey: key)
+            } else {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
     }
 }

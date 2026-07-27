@@ -83,6 +83,9 @@ struct RecordingsHomeView: View {
             }
         }
         .safeAreaInset(edge: .bottom) { recordButton }
+        // The record sheet owns the check-in while it is up; a root-level
+        // alert can't present through a fullScreenCover.
+        .recordingCheckInAlert(enabled: !showingRecordSheet)
         .fullScreenCover(isPresented: $showingRecordSheet) { RecordSheet() }
         .fileImporter(isPresented: $showingImporter,
                       allowedContentTypes: [.audio],
