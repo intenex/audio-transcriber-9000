@@ -60,6 +60,8 @@ rm /tmp/audiotranscriber-integration-tests
 >   -only-testing:AudioTranscriberTestsiOS/RecorderSpoolIntegrationTests test
 > ```
 > The device id for `-destination` comes from `-showdestinations` and differs from the `devicectl` UUID. Delete the marker (Files.app → the app's folder) when done. A freshly installed build has **no microphone TCC grant** — launch the app once and tap Allow, or every recorder test records digital silence.
+>
+> `LocalEngineIntegrationTests` falls back to `Documents/test_recording.wav` in the app container when the repo fixture isn't reachable, so the same `devicectl device copy to` trick runs the real transcription pipeline on the phone (first run downloads ~1.5 GB of models onto the device).
 
 > **Quit any running Audio Transcriber 9000 instance before gated recorder tests.** Tests run inside a fully live app (AppBootstrap wires the real stores), and a SECOND running instance shares the global spool: its cloud-watcher reloads sweep the spool and once adopted the test recorder's live segment files into the user's REAL iCloud library mid-test (0-bytes-on-disk failures, junk `segN.m4a` files in the container). The sweep now has stem + mtime guards, but an old binary (e.g. a stale /Applications copy) predates them.
 

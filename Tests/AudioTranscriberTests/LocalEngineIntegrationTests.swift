@@ -9,17 +9,23 @@ final class LocalEngineIntegrationTests: XCTestCase {
     private var enabled: Bool {
         ProcessInfo.processInfo.environment["FLUIDAUDIO_INTEGRATION"] == "1"
             // Env vars don't reliably forward to hosted test bundles; a marker
-            // file works everywhere: touch /tmp/audiotranscriber-integration-tests
-            || FileManager.default.fileExists(atPath: "/tmp/audiotranscriber-integration-tests")
+            // file works everywhere (and inside the iOS app container — see
+            // IntegrationGate): touch /tmp/audiotranscriber-integration-tests
+            || IntegrationGate.isEnabled
     }
 
     private var sampleURL: URL {
         // Repo root test fixture: 63s, two speakers.
-        URL(fileURLWithPath: #filePath)
+        let repoFixture = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()   // Tests/AudioTranscriberTests
             .deletingLastPathComponent()   // Tests
             .deletingLastPathComponent()   // repo root
             .appendingPathComponent("test_recording.wav")
+        if FileManager.default.fileExists(atPath: repoFixture.path) { return repoFixture }
+        // On a real iPhone the repo isn't reachable; copy the fixture into the
+        // app container instead (devicectl device copy to … Documents/).
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return documents.appendingPathComponent("test_recording.wav")
     }
 
     func testFullLocalPipeline() async throws {
