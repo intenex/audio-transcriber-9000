@@ -668,6 +668,102 @@ final class RecordingStore {
         }
     }
 
+    // MARK: - Combine
+
+    /// Recordings being folded into a combined file right now.
+    private(set) var mergingIDs: Set<UUID> = []
+
+    /// Joins `recordings` — in the order given — into one new recording.
+    ///
+    /// The combined file is written to the spool and its duration checked
+    /// against the sum of the parts before anything enters the library; the
+    /// originals are only removed if the caller asked for it, and only after
+    /// the result is in place. The new recording is dated from the earliest
+    /// part, because that is when the conversation actually happened.
+    @discardableResult
+    func combine(_ recordings: [Recording], name: String? = nil,
+                 deleteOriginals: Bool = false,
+                 format: RecordingFormat = .selected) async -> Recording? {
+        guard recordings.count >= 2 else {
+            errorMessage = RecordingMerger.MergeError.tooFewParts.localizedDescription
+            return nil
+        }
+        for recording in recordings {
+            if recording.fileURL == activeRecordingURL {
+                errorMessage = "“\(recording.displayName)” is still being recorded."
+                return nil
+            }
+            if recording.status == .processing || inFlightTranscriptionIDs.contains(recording.id) {
+                errorMessage = "“\(recording.displayName)” is being transcribed — combine it when that finishes."
+                return nil
+            }
+            if compressingProgress[recording.id] != nil || trimmingIDs.contains(recording.id)
+                || mergingIDs.contains(recording.id) {
+                errorMessage = "“\(recording.displayName)” is busy — try again in a moment."
+                return nil
+            }
+            if CloudPlaceholder.isPlaceholderOnly(recording.fileURL) {
+                errorMessage = "“\(recording.displayName)” hasn't been downloaded from iCloud yet."
+                return nil
+            }
+        }
+
+        let ids = Set(recordings.map(\.id))
+        mergingIDs.formUnion(ids)
+        defer { mergingIDs.subtract(ids) }
+
+        let plan: RecordingMerger.Plan
+        do {
+            plan = try RecordingMerger.plan(for: recordings, format: format)
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+
+        let workURL = SpoolLocation.url(fileName: "merge-\(UUID().uuidString).\(format.fileExtension)")
+        do {
+            try await RecordingMerger.merge(plan, to: workURL)
+        } catch {
+            try? FileManager.default.removeItem(at: workURL)
+            errorMessage = "Couldn't combine the recordings: \(error.localizedDescription)"
+            return nil
+        }
+
+        let earliest = recordings.map(\.date).min() ?? .now
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
+        let destURL = uniqueURL(for: storageDirectory
+            .appendingPathComponent("recording_\(formatter.string(from: earliest)).\(format.fileExtension)"))
+        do {
+            try FileManager.default.moveItem(at: workURL, to: destURL)
+        } catch {
+            try? FileManager.default.removeItem(at: workURL)
+            errorMessage = "Couldn't move the combined recording into the library: \(error.localizedDescription)"
+            return nil
+        }
+
+        let duration = Self.audioDuration(for: destURL)
+        var combined = Recording(fileURL: destURL, date: earliest, duration: duration)
+        let trimmedName = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        combined.name = (trimmedName?.isEmpty == false) ? trimmedName : nil
+        combined.category = recordings.first?.category
+        combined.fileSizeBytes = Self.fileSize(of: destURL)
+
+        let partCount = recordings.count
+        let partLabel = RecordingMerger.summary(for: plan)
+        if deleteOriginals {
+            // Only now that the combined file is on disk and verified.
+            for recording in recordings { delete(recording) }
+        }
+        insert(combined)
+
+        NSLog("[RecordingStore] Combined \(partCount) recordings into \(destURL.lastPathComponent) (\(Int(duration))s)")
+        infoMessage = deleteOriginals
+            ? "Combined \(partCount) recordings into one — \(partLabel). The originals were deleted."
+            : "Combined \(partCount) recordings into one — \(partLabel). The originals were kept."
+        return combined
+    }
+
     /// "3 h 12 m" / "8 m" — for user-facing trim/skip messages.
     static func durationLabel(_ seconds: TimeInterval) -> String {
         let total = Int(seconds.rounded())

@@ -18,6 +18,13 @@ struct RecordingsHomeView: View {
     @State private var renamingRecording: Recording? = nil
     @State private var renameText = ""
     @State private var deletingRecording: Recording? = nil
+    @State private var combineSeed: CombineTarget? = nil
+
+    /// Sheet payload: which recordings the combine sheet opens with.
+    struct CombineTarget: Identifiable {
+        let id = UUID()
+        let recordingIDs: [UUID]
+    }
 
     var body: some View {
         List {
@@ -75,6 +82,14 @@ struct RecordingsHomeView: View {
                 } label: {
                     Image(systemName: "square.and.arrow.down")
                 }
+                if store.recordings.count >= 2 {
+                    Button {
+                        combineSeed = CombineTarget(recordingIDs: [])
+                    } label: {
+                        Image(systemName: "arrow.trianglehead.merge")
+                    }
+                    .accessibilityLabel("Combine Recordings")
+                }
                 NavigationLink {
                     SettingsHomeView()
                 } label: {
@@ -87,6 +102,9 @@ struct RecordingsHomeView: View {
         // alert can't present through a fullScreenCover.
         .recordingCheckInAlert(enabled: !showingRecordSheet)
         .fullScreenCover(isPresented: $showingRecordSheet) { RecordSheet() }
+        .sheet(item: $combineSeed) { target in
+            CombineRecordingsSheet(initialSelection: target.recordingIDs)
+        }
         .fileImporter(isPresented: $showingImporter,
                       allowedContentTypes: [.audio],
                       allowsMultipleSelection: true) { result in
@@ -244,6 +262,12 @@ struct RecordingsHomeView: View {
             Label("Trim Silent Ending", systemImage: "scissors")
         }
         .disabled(recording.status == .processing || store.trimmingIDs.contains(recording.id))
+        Button {
+            combineSeed = CombineTarget(recordingIDs: [recording.id])
+        } label: {
+            Label("Combine with…", systemImage: "arrow.trianglehead.merge")
+        }
+        .disabled(store.recordings.count < 2)
         Divider()
         Button(role: .destructive) {
             deletingRecording = recording

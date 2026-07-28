@@ -14,6 +14,13 @@ struct RecordingListView: View {
         Set(UserDefaults.standard.stringArray(forKey: "collapsedCategories") ?? [])
     @State private var newCategorySheet: NewCategoryTarget? = nil
     @State private var renamingCategory: String? = nil
+    @State private var combineSeed: CombineTarget? = nil
+
+    /// Sheet payload: which recordings the combine sheet opens with.
+    struct CombineTarget: Identifiable {
+        let id = UUID()
+        let recordingIDs: [UUID]
+    }
 
     /// Sheet payload: the recording to move into the newly created category
     /// (nil id = just create).
@@ -48,6 +55,11 @@ struct RecordingListView: View {
                     showGlobalChat = false
                 })
                 ImportAudioRow()
+                if store.recordings.count >= 2 {
+                    CombineRecordingsRow {
+                        combineSeed = CombineTarget(recordingIDs: [])
+                    }
+                }
                 GlobalChatRow(showGlobalChat: $showGlobalChat, selectedRecordingID: $selectedRecordingID)
             }
 
@@ -156,6 +168,9 @@ struct RecordingListView: View {
             CategoryNameSheet(title: "Rename Category", initialName: category) { name in
                 store.renameCategory(category, to: name)
             }
+        }
+        .sheet(item: $combineSeed) { target in
+            CombineRecordingsSheet(initialSelection: target.recordingIDs)
         }
         .onChange(of: selectedRecordingID) { _, newValue in
             if newValue != nil { showGlobalChat = false }
@@ -332,6 +347,14 @@ struct RecordingListView: View {
         }
         .disabled(recording.status == .processing || store.trimmingIDs.contains(recording.id))
         .help("Removes the stretch at the end where nothing was captured, keeping 15 seconds of margin.")
+
+        Button {
+            combineSeed = CombineTarget(recordingIDs: [recording.id])
+        } label: {
+            Label("Combine with…", systemImage: "arrow.trianglehead.merge")
+        }
+        .disabled(store.recordings.count < 2)
+        .help("Join this recording with others into one file, in an order you choose.")
 
         Divider()
 
@@ -596,6 +619,32 @@ struct ImportAudioRow: View {
             }
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Combine Recordings Row
+
+struct CombineRecordingsRow: View {
+    let onOpen: () -> Void
+
+    var body: some View {
+        Button(action: onOpen) {
+            HStack(spacing: 8) {
+                ZStack {
+                    Circle()
+                        .fill(AppTheme.warning.opacity(0.15))
+                        .frame(width: 28, height: 28)
+                    Image(systemName: "arrow.trianglehead.merge")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(AppTheme.warning)
+                }
+                Text("Combine Recordings")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AppTheme.warning)
+            }
+        }
+        .buttonStyle(.plain)
+        .help("Join several recordings into one, in an order you choose.")
     }
 }
 

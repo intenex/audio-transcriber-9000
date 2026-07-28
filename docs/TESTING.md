@@ -4,7 +4,7 @@ What exists, how to run it, and what "verified" means in this project. See [DEVE
 
 ## Test suites (Tests/AudioTranscriberTests/, `@testable import AudioTranscriber`)
 
-**Unit — always run, no network, no models (260 on macOS / 263 on the iOS simulator as of 2026-07-27; totals incl. skipped gated suites: 276 / 272):**
+**Unit — always run, no network, no models (272 on macOS / 275 on the iOS simulator as of 2026-07-27; totals incl. skipped gated suites: 288 / 284):**
 
 | Suite | Covers |
 |---|---|
@@ -35,6 +35,7 @@ What exists, how to run it, and what "verified" means in this project. See [DEVE
 | `LiveFixVerificationTests` (gated) | Exact bug repros on real data: the quirky 2 h WAV compresses fully (duration-matched — old AVAssetReader path truncated at ~150 s), and a live MiniMax-M3 summary on a real transcript (real Keychain key; think-block-free JSON) |
 | `RecordingGuardrailTests` | Unattended-recording guardrails. Level math (known-amplitude sine → exact dBFS, digital silence → floor, loudest channel wins). `SilenceDetector`: digital silence stops exactly at the limit; **and, over hours of simulated time, never stops** a conversation with pauses, quiet distant speech, steady loud content, content sitting on the -45 dBFS line, or sparse transients; one sounding buffer resets the clock; a device-change restart resets it, a silence-triggered restart deliberately does not (so recovery can't defer the limit); slow noise-floor rise protects faint unvarying content for minutes. `LongRecordingCheckIn`: fires per interval, never bursts after a late wake, acknowledgement pushes the next out, 0 disables. `RecordingLevelMonitor`: wall-clock silence, missing buffers count as silence, safe under 4-way concurrent observation |
 | `TrailingSilenceTrimTests` | Silent-tail trim: plan cuts a 180 s tail but keeps 15 s of padding after the last sound, returns **nil** when audio runs to the end or the tail is under a minute, and rejects unreadable files; passthrough trim of WAV and m4a lands the kept duration and shrinks the file while the tone survives; store op swaps in place (same URL, sidecars still matching, duration/size updated), reports "nothing to trim", and refuses while transcribing or for the active capture |
+| `RecordingMergeTests` | Combining recordings, on real audio: a loud part plus a near-silent part merge to the summed duration, and **the halves swap when the order swaps** (level of each half measured from the merged file) — the ordering guarantee the feature exists for; the result is dated from the earliest part and starts `.pending`; originals survive by default and are removed with their sidecars only when asked; refuses a single part, a part being transcribed, and the recording being captured; plan totals come from the files, not a stale manifest duration, and an unreadable part throws |
 | `SilenceDetectorRealAudioTests` | The guardrail replayed over REAL audio (tap-sized buffers): the 63 s conversation fixture reads as at most **1.1 s** of silence, a -30 dB whisper-level copy at most **3.4 s** (limit: 1200 s), and a dithered silent capture does trip a shortened limit. Gated variant sweeps the user's whole library (below) |
 | `AudioRecorderTests` / `TranscriptionServiceTests` | model basics, formatter output, service initial state |
 
