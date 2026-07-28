@@ -84,6 +84,10 @@ struct CombineRecordingsSheet: View {
             Form {
                 Section {
                     partsRows
+                        // Drag-to-reorder needs edit mode; scoped to this
+                        // section so the name field and switch below stay
+                        // ordinary rows.
+                        .environment(\.editMode, .constant(.active))
                 } header: {
                     Text("Order — top plays first")
                 } footer: {
@@ -96,7 +100,6 @@ struct CombineRecordingsSheet: View {
                     options
                 }
             }
-            .environment(\.editMode, .constant(.active))
             .navigationTitle("Combine Recordings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -169,6 +172,7 @@ struct CombineRecordingsSheet: View {
             .buttonStyle(.borderless)
             .disabled(index == 0)
             .help("Move earlier")
+            .accessibilityLabel("Move earlier")
 
             Button {
                 move(from: index, to: index + 1)
@@ -178,6 +182,7 @@ struct CombineRecordingsSheet: View {
             .buttonStyle(.borderless)
             .disabled(index == parts.count - 1)
             .help("Move later")
+            .accessibilityLabel("Move later")
 
             Button {
                 orderedIDs.removeAll { $0 == recording.id }
@@ -186,6 +191,7 @@ struct CombineRecordingsSheet: View {
             }
             .buttonStyle(.borderless)
             .help("Remove from the combination")
+            .accessibilityLabel("Remove from the combination")
         }
         .padding(.vertical, 2)
     }
