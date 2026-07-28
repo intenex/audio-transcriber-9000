@@ -77,8 +77,13 @@ final class CloudSyncManager {
     private func handleExternalChanges(_ changes: [SyncChange]) {
         guard isEnabled else { return }
         stateVersion += 1
-        // Ignore pure-status churn on the active recording's spool (never in
-        // container) and coalesce bursts into one reload.
+        // Our own writes come back through the same notification. Reloading on
+        // them is pure waste at best; at worst it rebuilds the library from
+        // disk in the middle of an operation whose state lives in memory
+        // (a running transcription's .processing status). Only genuinely
+        // foreign changes are worth a reload.
+        guard changes.contains(where: { !AtomicFile.isRecentSelfWrite($0.fileName) }) else { return }
+        // Coalesce bursts into one reload.
         reloadDebounce?.cancel()
         reloadDebounce = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(800))

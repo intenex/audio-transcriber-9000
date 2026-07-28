@@ -20,6 +20,13 @@ final class RecordingStore {
     /// The launch/reload spool sweep must never touch it.
     var activeRecordingURL: URL? = nil
 
+    /// Recordings the transcription queue is running or holding right now,
+    /// maintained by TranscriptionService. `load()` is not only a launch path —
+    /// an iCloud change reloads the library at any moment — and its repair pass
+    /// would otherwise roll a live job back to `.pending` from disk, hiding the
+    /// progress UI while the job keeps running. In-memory truth wins for these.
+    var inFlightTranscriptionIDs: Set<UUID> = []
+
     private(set) var storageDirectory: URL
 
     private let defaults: UserDefaults
@@ -124,6 +131,12 @@ final class RecordingStore {
         // is the truth — never demote a finished recording.
         for idx in loaded.indices {
             let recording = loaded[idx]
+            // A job this process is running right now is not stale state — it
+            // simply hasn't written its checkpoint or transcript yet.
+            if inFlightTranscriptionIDs.contains(recording.id) {
+                loaded[idx].status = .processing
+                continue
+            }
             switch recording.status {
             case .processing:
                 if FileManager.default.fileExists(atPath: recording.checkpointURL.path) {

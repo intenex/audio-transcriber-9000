@@ -255,4 +255,36 @@ final class MigrationAndWatcherTests: XCTestCase {
         XCTAssertEqual(store.recordings.count, 1, "watcher batch must reload the library")
         XCTAssertEqual(store.recordings.first?.fileURL.lastPathComponent, "from-phone.wav")
     }
+
+    /// Every sidecar this app writes bounces back through the same change
+    /// notification. Reloading on that echo rebuilds the library from disk
+    /// underneath whatever the app is doing — the bug that made a running
+    /// transcription look like it had never started.
+    func testOwnWriteEchoDoesNotReloadTheLibrary() async throws {
+        defaults.set(true, forKey: CloudSyncManager.enabledKey)
+        defaults.set(containerDir.path, forKey: CloudSyncManager.containerPathKey)
+        try? FileManager.default.createDirectory(at: containerDir, withIntermediateDirectories: true)
+        store.reloadFromStorageDirectory()
+        cloudSync.startWatching()
+
+        AtomicFile.resetSelfWriteLedger()
+        let meta = containerDir.appendingPathComponent("mine.meta.json")
+        try AtomicFile.write(Data("{}".utf8), to: meta)
+        // A file that only exists on disk — a reload would adopt it.
+        let sneaked = containerDir.appendingPathComponent("appears-on-reload.wav")
+        try Data(count: 8192).write(to: sneaked)
+
+        engine.simulateChanges([SyncChange(kind: .changed, fileName: "mine.meta.json")])
+        try await Task.sleep(for: .milliseconds(1200))
+        XCTAssertTrue(store.recordings.isEmpty, "an echo of our own write must not trigger a reload")
+
+        // A foreign change in the same batch still gets through.
+        engine.simulateChanges([SyncChange(kind: .changed, fileName: "mine.meta.json"),
+                                SyncChange(kind: .added, fileName: "appears-on-reload.wav")])
+        let deadline = Date().addingTimeInterval(5)
+        while store.recordings.isEmpty && Date() < deadline {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        XCTAssertEqual(store.recordings.count, 1, "a genuine change alongside an echo must still reload")
+    }
 }

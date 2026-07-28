@@ -81,6 +81,9 @@ final class TranscriptionService {
         guard !isActive(recordingID), queuePosition(of: recordingID) == nil else { return }
 
         requestNotificationAuthIfNeeded()
+        // Claim it before the status write: a library reload can arrive at any
+        // moment (iCloud), and the claim is what tells it this job is live.
+        store.inFlightTranscriptionIDs.insert(recordingID)
         store.update(recordingID) { $0.status = .processing; $0.lastError = nil }
         queue.append(QueuedJob(recordingID: recordingID, engineKind: kind))
         startWorkerIfNeeded()
@@ -93,6 +96,7 @@ final class TranscriptionService {
             jobTask?.cancel()
         } else if let idx = queue.firstIndex(where: { $0.recordingID == recordingID }) {
             queue.remove(at: idx)
+            store?.inFlightTranscriptionIDs.remove(recordingID)
             let status = statusForExistingCheckpoint(recordingID)
             store?.update(recordingID) { $0.status = status }
         }
@@ -105,6 +109,7 @@ final class TranscriptionService {
             jobTask?.cancel()
         } else if let idx = queue.firstIndex(where: { $0.recordingID == recordingID }) {
             queue.remove(at: idx)
+            store?.inFlightTranscriptionIDs.remove(recordingID)
             deleteCheckpoint(recordingID)
             store?.update(recordingID) { $0.status = .pending }
         }
@@ -152,7 +157,11 @@ final class TranscriptionService {
     private static let maxAttempts = 3
 
     private func run(_ job: QueuedJob) async {
-        guard let store, store.recording(with: job.recordingID) != nil else { return }
+        guard let store else { return }
+        // The claim is released however this job ends — completed, failed,
+        // paused, cancelled, or the recording vanished underneath it.
+        defer { store.inFlightTranscriptionIDs.remove(job.recordingID) }
+        guard store.recording(with: job.recordingID) != nil else { return }
         guard let engine = engine(for: job.engineKind) else {
             store.update(job.recordingID) { $0.status = .failed }
             errorMessage = "\(job.engineKind.displayName) isn't configured. Add its API key in Settings."

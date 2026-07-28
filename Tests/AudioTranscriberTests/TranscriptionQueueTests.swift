@@ -197,4 +197,58 @@ final class TranscriptionQueueTests: XCTestCase {
 
         service.cancel(first.id)
     }
+
+    // MARK: - Live state vs. library reloads
+
+    /// A reload is not only a launch event: any iCloud change reloads the
+    /// library from disk. Its repair pass used to demote the running job to
+    /// `.pending` — the transcription kept going, but every progress view in
+    /// the app switched back to "Ready to transcribe".
+    func testReloadDuringActiveJobKeepsProcessingStatus() async {
+        let recording = addRecording("reloaded")
+        service.engineOverride = MockTranscriptionEngine { _ in
+            try await Task.sleep(for: .milliseconds(400))
+            return TranscriptionOutput(result: TranscriptionResult(segments: [], language: "en", numSpeakers: 0))
+        }
+
+        service.enqueue(recording.id)
+        await waitUntil { self.service.isActive(recording.id) }
+        XCTAssertTrue(store.inFlightTranscriptionIDs.contains(recording.id))
+
+        store.reloadFromStorageDirectory()
+        XCTAssertEqual(store.recording(with: recording.id)?.status, .processing,
+                       "a mid-job reload must not roll the live job back")
+        XCTAssertTrue(service.isActive(recording.id), "and the job itself keeps running")
+
+        await waitUntil { self.store.recording(with: recording.id)?.status == .done }
+        XCTAssertEqual(store.recording(with: recording.id)?.status, .done)
+        XCTAssertTrue(store.inFlightTranscriptionIDs.isEmpty, "claim released when the job ends")
+    }
+
+    /// The claim must not outlive the job, or a later reload would resurrect
+    /// `.processing` for a recording nothing is working on.
+    func testQueuedAndCancelledJobsReleaseTheirClaim() async {
+        let first = addRecording("holding")
+        let second = addRecording("queued")
+        service.engineOverride = MockTranscriptionEngine { _ in
+            try await Task.sleep(for: .seconds(30))
+            return TranscriptionOutput(result: TranscriptionResult(segments: [], language: "en", numSpeakers: 0))
+        }
+
+        service.enqueue(first.id)
+        service.enqueue(second.id)
+        await waitUntil { self.service.isActive(first.id) }
+        XCTAssertEqual(store.inFlightTranscriptionIDs, [first.id, second.id])
+
+        service.cancel(second.id)
+        XCTAssertFalse(store.inFlightTranscriptionIDs.contains(second.id))
+        store.reloadFromStorageDirectory()
+        XCTAssertEqual(store.recording(with: second.id)?.status, .pending)
+
+        service.cancel(first.id)
+        await waitUntil { self.store.inFlightTranscriptionIDs.isEmpty }
+        XCTAssertTrue(store.inFlightTranscriptionIDs.isEmpty)
+        store.reloadFromStorageDirectory()
+        XCTAssertEqual(store.recording(with: first.id)?.status, .pending)
+    }
 }
