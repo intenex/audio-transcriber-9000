@@ -185,7 +185,12 @@ final class AudioRecorder: NSObject {
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                try await self.beginCaptureSegment()
+                // The audio session/HAL can still be settling when Record is
+                // pressed right after playback or an interruption — the input
+                // node then reports an unusable format. Interruptions already
+                // get retried (handleCaptureFailure); the initial start needs
+                // the same courtesy rather than failing in the user's face.
+                try await self.beginCaptureSegmentWithRetries()
                 self.isRecording = true
                 self.recordingDuration = 0
                 self.recordingStartDate = Date()
@@ -201,6 +206,27 @@ final class AudioRecorder: NSObject {
                 self.segmentURLs = []
             }
         }
+    }
+
+    /// `beginCaptureSegment` with a short retry: a fresh audio session may take
+    /// a moment to reach the HAL, and the first attempt then sees a 0 Hz input.
+    @MainActor
+    private func beginCaptureSegmentWithRetries(attempts: Int = 3) async throws {
+        var lastError: Error?
+        for attempt in 1...attempts {
+            do {
+                try await beginCaptureSegment()
+                return
+            } catch {
+                lastError = error
+                NSLog("[AudioRecorder] Capture start attempt \(attempt)/\(attempts) failed: \(error)")
+                if attempt < attempts {
+                    try? await Task.sleep(for: .milliseconds(300 * attempt))
+                }
+            }
+        }
+        throw lastError ?? NSError(domain: "AudioRecorder", code: 4, userInfo: [
+            NSLocalizedDescriptionKey: "the audio input could not be opened"])
     }
 
     /// Builds one capture chain (engine + optional system-audio aggregate) and

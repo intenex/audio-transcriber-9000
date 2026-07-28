@@ -318,11 +318,31 @@ final class RecordingStore {
             }
             let size = values?.fileSize ?? 0
             if size > 4096 {
+                // An unfinalized container (interrupted stop/merge) carries
+                // audio data but no index — unplayable. Set it aside instead
+                // of showing a 0-second entry in the library.
+                guard Self.audioDuration(for: url) > 0 else {
+                    quarantineUnfinished(url)
+                    continue
+                }
                 _ = finalizeRecordingFile(at: url)
             } else {
                 // Header-only stubs and abandoned temp work files.
                 try? FileManager.default.removeItem(at: url)
             }
+        }
+    }
+
+    /// Moves an unfinalized crash leftover out of the spool without deleting it.
+    private func quarantineUnfinished(_ url: URL) {
+        let directory = SpoolLocation.unfinishedDirectory
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let destination = uniqueURL(for: directory.appendingPathComponent(url.lastPathComponent))
+        do {
+            try FileManager.default.moveItem(at: url, to: destination)
+            NSLog("[RecordingStore] Unfinalized leftover set aside: \(destination.lastPathComponent)")
+        } catch {
+            NSLog("[RecordingStore] Couldn't quarantine \(url.lastPathComponent): \(error)")
         }
     }
 
@@ -558,6 +578,92 @@ final class RecordingStore {
     private(set) var compressingProgress: [UUID: Double] = [:]
 
     var compressingIDs: Set<UUID> { Set(compressingProgress.keys) }
+
+    /// Recordings whose silent tail is being cut (presence = in progress).
+    private(set) var trimmingIDs: Set<UUID> = []
+
+    /// Drops the silent tail of a recording, in place: same URL and stem, so
+    /// every sidecar keeps matching and transcript timings (which all precede
+    /// the cut) stay valid. The replacement is written to the spool and
+    /// duration-verified before it replaces the original — never the other way
+    /// around.
+    ///
+    /// Returns true when something was actually trimmed. `announce: false`
+    /// keeps the automatic post-recording pass quiet unless it fails.
+    @discardableResult
+    func trimTrailingSilence(_ recording: Recording, announce: Bool = true) async -> Bool {
+        guard !trimmingIDs.contains(recording.id) else { return false }
+        guard recording.fileURL != activeRecordingURL else {
+            if announce { errorMessage = "That recording is still being captured." }
+            return false
+        }
+        // The engine is reading this file right now; don't move the ground.
+        if let current = self.recording(with: recording.id), current.status == .processing {
+            if announce { errorMessage = "“\(recording.displayName)” is being transcribed — trim it when that finishes." }
+            return false
+        }
+        trimmingIDs.insert(recording.id)
+        defer { trimmingIDs.remove(recording.id) }
+
+        let sourceURL = recording.fileURL
+        let plan: TrailingSilenceTrimmer.Plan?
+        do {
+            plan = try await Task.detached(priority: .userInitiated) {
+                try TrailingSilenceTrimmer.plan(for: sourceURL)
+            }.value
+        } catch {
+            if announce { errorMessage = "Couldn't examine “\(recording.displayName)”: \(error.localizedDescription)" }
+            return false
+        }
+        guard let plan else {
+            if announce {
+                infoMessage = "“\(recording.displayName)” has no silent tail worth trimming."
+            }
+            return false
+        }
+
+        let workURL = SpoolLocation.url(fileName: "trim-\(recording.id.uuidString).\(sourceURL.pathExtension)")
+        try? FileManager.default.removeItem(at: workURL)
+        do {
+            try await TrailingSilenceTrimmer.trim(sourceURL, keepingFirst: plan.keepDuration, to: workURL)
+            let newDuration = Self.audioDuration(for: workURL)
+            let tolerance = max(2.0, plan.keepDuration * 0.02)
+            guard newDuration > 0, abs(newDuration - plan.keepDuration) <= tolerance else {
+                try? FileManager.default.removeItem(at: workURL)
+                errorMessage = "Trim aborted for “\(recording.displayName)”: the trimmed file holds \(Int(newDuration))s instead of \(Int(plan.keepDuration))s. Original kept."
+                return false
+            }
+            // Atomic in-place swap; the original only disappears once the
+            // replacement is on disk and verified.
+            _ = try FileManager.default.replaceItemAt(sourceURL, withItemAt: workURL)
+            let newBytes = Self.fileSize(of: sourceURL)
+            update(recording.id) {
+                $0.duration = newDuration
+                $0.fileSizeBytes = newBytes
+            }
+            if announce {
+                let saved = ByteCountFormatter.string(fromByteCount: max(0, plan.originalBytes - newBytes),
+                                                      countStyle: .file)
+                infoMessage = "Trimmed \(Self.durationLabel(plan.trimmedDuration)) of silence from “\(recording.displayName)” — \(saved) saved."
+            }
+            NSLog("[RecordingStore] Trimmed \(Int(plan.trimmedDuration))s of silence from \(sourceURL.lastPathComponent)")
+            return true
+        } catch {
+            try? FileManager.default.removeItem(at: workURL)
+            errorMessage = "Couldn't trim “\(recording.displayName)”: \(error.localizedDescription). Original kept."
+            return false
+        }
+    }
+
+    /// "3 h 12 m" / "8 m" — for user-facing trim/skip messages.
+    static func durationLabel(_ seconds: TimeInterval) -> String {
+        let total = Int(seconds.rounded())
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        if hours > 0 { return "\(hours) h \(minutes) m" }
+        if minutes > 0 { return "\(minutes) m" }
+        return "\(total) s"
+    }
 
     /// Converts an uncompressed recording to AAC in place: same file stem (so
     /// every sidecar keeps matching), duration-verified, original deleted only

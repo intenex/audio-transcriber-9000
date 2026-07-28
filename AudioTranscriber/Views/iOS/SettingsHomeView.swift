@@ -15,6 +15,7 @@ struct SettingsHomeView: View {
     @AppStorage("confirmCloudTranscription") private var confirmCloud = true
     @AppStorage("autoSummarize") private var autoSummarize = true
     @AppStorage("autoTranscribeNewRecordings") private var autoTranscribe = true
+    @AppStorage("autoTrimTrailingSilence") private var autoTrimSilence = false
     @AppStorage("liveTranscriptionPreview") private var livePreview = true
     @AppStorage("chatProviderID") private var selectedProvider = ""
     @AppStorage("miniMaxModel") private var miniMaxModel = "MiniMax-M3"
@@ -41,6 +42,10 @@ struct SettingsHomeView: View {
                 Toggle("Auto-transcribe new recordings", isOn: $autoTranscribe)
                 Toggle("Generate summary after transcription", isOn: $autoSummarize)
                 Toggle("Live transcript preview while recording", isOn: $livePreview)
+                Toggle("Trim silent endings", isOn: $autoTrimSilence)
+                Text("New recordings lose the stretch at the end where nothing was captured (15 s of margin kept). Any recording can also be trimmed from its context menu.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section {

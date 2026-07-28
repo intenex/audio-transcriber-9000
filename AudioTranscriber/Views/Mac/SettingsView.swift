@@ -26,6 +26,7 @@ struct GeneralSettingsTab: View {
     @AppStorage("confirmCloudTranscription") private var confirmCloud = true
     @AppStorage("autoSummarize") private var autoSummarize = true
     @AppStorage("autoTranscribeNewRecordings") private var autoTranscribe = true
+    @AppStorage("autoTrimTrailingSilence") private var autoTrimSilence = false
     @AppStorage("liveTranscriptionPreview") private var livePreview = true
 
     var body: some View {
@@ -45,6 +46,10 @@ struct GeneralSettingsTab: View {
             Section {
                 Toggle("Generate summary after transcription", isOn: $autoSummarize)
                 Toggle("Live transcript preview while recording", isOn: $livePreview)
+                Toggle("Trim silent endings from new recordings", isOn: $autoTrimSilence)
+                Text("Cuts the stretch at the end where nothing was captured, keeping 15 seconds of margin. Any recording can also be trimmed on demand from its context menu.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             } header: {
                 Label("Behavior", systemImage: "sparkles")
             }

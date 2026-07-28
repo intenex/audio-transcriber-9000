@@ -238,6 +238,12 @@ struct RecordingsHomeView: View {
                 Label("Compress Audio", systemImage: "archivebox")
             }
         }
+        Button {
+            Task { await store.trimTrailingSilence(recording) }
+        } label: {
+            Label("Trim Silent Ending", systemImage: "scissors")
+        }
+        .disabled(recording.status == .processing || store.trimmingIDs.contains(recording.id))
         Divider()
         Button(role: .destructive) {
             deletingRecording = recording

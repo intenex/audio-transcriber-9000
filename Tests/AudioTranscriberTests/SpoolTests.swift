@@ -1,3 +1,4 @@
+import AVFoundation
 import XCTest
 @testable import AudioTranscriber
 
@@ -26,15 +27,44 @@ final class SpoolTests: XCTestCase {
                        defaults: UserDefaults(suiteName: "SpoolTests-\(UUID().uuidString)")!)
     }
 
-    private func spoolFile(_ name: String, bytes: Int, ageSeconds: TimeInterval = 0) throws -> URL {
+    /// A real, readable audio leftover (a finalized container the app crashed
+    /// before moving). `playable: false` writes the other kind: data with no
+    /// index, which is what an interrupted stop or merge leaves behind.
+    private func spoolFile(_ name: String, bytes: Int, ageSeconds: TimeInterval = 0,
+                           playable: Bool = true) throws -> URL {
         let url = SpoolLocation.url(fileName: name)
-        try Data(count: bytes).write(to: url)
+        if playable {
+            try writeTone(to: url, seconds: max(1.0, Double(bytes) / 32_000))
+        } else {
+            try Data(count: bytes).write(to: url)
+        }
         if ageSeconds > 0 {
             try FileManager.default.setAttributes(
                 [.modificationDate: Date(timeIntervalSinceNow: -ageSeconds)], ofItemAtPath: url.path)
         }
         spooled.append(url)
         return url
+    }
+
+    private func writeTone(to url: URL, seconds: Double) throws {
+        let sampleRate = 16_000.0
+        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate,
+                                   channels: 1, interleaved: false)!
+        let isWAV = url.pathExtension.lowercased() == "wav"
+        let settings: [String: Any] = isWAV
+            ? [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: sampleRate,
+               AVNumberOfChannelsKey: 1, AVLinearPCMBitDepthKey: 16]
+            : [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: sampleRate,
+               AVNumberOfChannelsKey: 1, AVEncoderBitRateKey: 32_000]
+        try autoreleasepool {
+            let file = try AVAudioFile(forWriting: url, settings: settings,
+                                       commonFormat: .pcmFormatFloat32, interleaved: false)
+            let frames = AVAudioFrameCount(seconds * sampleRate)
+            let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames)!
+            buffer.frameLength = frames
+            for i in 0..<Int(frames) { buffer.floatChannelData![0][i] = 0.3 * sinf(Float(i) * 0.05) }
+            try file.write(from: buffer)
+        }
     }
 
     func testFinalizeMovesSpoolFileIntoLibrary() throws {
@@ -91,6 +121,28 @@ final class SpoolTests: XCTestCase {
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: segment.path),
                       "segments of the live recording belong to the recorder, not the sweep")
+    }
+
+    /// An interrupted stop or merge leaves a container with audio data but no
+    /// index — unplayable. Adopting it puts a 0-second, 619 MB phantom
+    /// "recording" in the library (that happened); it must be set aside
+    /// instead, and never deleted.
+    func testSweepQuarantinesUnfinalizedLeftovers() throws {
+        let broken = try spoolFile("recording_broken-\(UUID().uuidString).m4a",
+                                   bytes: 200_000, ageSeconds: 300, playable: false)
+        let store = makeStore()
+        store.load()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: broken.path), "moved out of the spool")
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: tempDir.appendingPathComponent(broken.lastPathComponent).path),
+            "an unplayable file must not enter the library")
+        let quarantined = SpoolLocation.unfinishedDirectory
+            .appendingPathComponent(broken.lastPathComponent)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: quarantined.path),
+                      "the bytes are kept for recovery")
+        XCTAssertTrue(store.recordings.isEmpty)
+        try? FileManager.default.removeItem(at: quarantined)
     }
 
     /// Cross-instance protection: files modified moments ago are presumed to

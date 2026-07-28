@@ -16,4 +16,14 @@ enum SpoolLocation {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory.appendingPathComponent(fileName)
     }
+
+    /// Where crash leftovers whose container was never finalized go. They hold
+    /// real audio data but no index, so nothing can play them — putting one in
+    /// the library just shows the user an unplayable 0-second "recording"
+    /// (that is exactly how a 619 MB phantom entry appeared once). They are
+    /// kept, never deleted: a repair tool can still get at the bytes.
+    static var unfinishedDirectory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("AudioTranscriber/Unfinished", isDirectory: true)
+    }
 }

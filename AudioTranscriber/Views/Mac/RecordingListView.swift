@@ -325,6 +325,14 @@ struct RecordingListView: View {
             .disabled(recording.status == .processing || store.compressingIDs.contains(recording.id))
         }
 
+        Button {
+            Task { await store.trimTrailingSilence(recording) }
+        } label: {
+            Label("Trim Silent Ending", systemImage: "scissors")
+        }
+        .disabled(recording.status == .processing || store.trimmingIDs.contains(recording.id))
+        .help("Removes the stretch at the end where nothing was captured, keeping 15 seconds of margin.")
+
         Divider()
 
         Button(role: .destructive) {

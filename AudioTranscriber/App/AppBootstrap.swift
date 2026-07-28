@@ -45,11 +45,20 @@ enum AppBootstrap {
             }
         }
         // Auto-transcribe every new recording/import (default ON);
-        // summary + smart auto-naming follow transcription.
-        recordingStore.onRecordingAdded = { [weak transcriptionService] id in
+        // summary + smart auto-naming follow transcription. Optional silent-tail
+        // trim runs FIRST (default OFF) so transcription sees the final file.
+        recordingStore.onRecordingAdded = { [weak transcriptionService, weak recordingStore] id in
             let auto = UserDefaults.standard.object(forKey: "autoTranscribeNewRecordings") as? Bool ?? true
-            if auto {
-                transcriptionService?.enqueue(id)
+            let autoTrim = UserDefaults.standard.bool(forKey: "autoTrimTrailingSilence")
+            guard autoTrim, let recordingStore else {
+                if auto { transcriptionService?.enqueue(id) }
+                return
+            }
+            Task { @MainActor in
+                if let recording = recordingStore.recording(with: id) {
+                    await recordingStore.trimTrailingSilence(recording, announce: false)
+                }
+                if auto { transcriptionService?.enqueue(id) }
             }
         }
         // Owns the notification-center delegate: the long-recording check-in
