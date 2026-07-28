@@ -247,7 +247,7 @@ struct TranscriptionView: View {
     }
 
     private var statusPill: some View {
-        StatusPill(status: recording.status)
+        StatusPill(status: recording.status, recordingID: recording.id)
     }
 
     @ViewBuilder

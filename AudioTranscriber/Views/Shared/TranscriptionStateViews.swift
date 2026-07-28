@@ -11,13 +11,17 @@ enum DetailTab: String, CaseIterable {
 
 struct StatusPill: View {
     let status: TranscriptionStatus
+    /// Supplied wherever the queue is reachable, so a processing pill can say
+    /// how far along the job actually is instead of just "Processing".
+    var recordingID: UUID? = nil
+    @Environment(TranscriptionService.self) private var transcriptionService
 
     var body: some View {
         switch status {
         case .done:
             pill("Transcribed", tint: AppTheme.success)
         case .processing:
-            pill("Processing...", tint: AppTheme.processing)
+            pill(processingLabel, tint: AppTheme.processing)
         case .failed:
             pill("Failed", tint: AppTheme.recording)
         case .paused:
@@ -27,6 +31,18 @@ struct StatusPill: View {
         case .pending:
             EmptyView()
         }
+    }
+
+    private var processingLabel: String {
+        guard let recordingID else { return "Processing…" }
+        if transcriptionService.isActive(recordingID) {
+            let percent = Int(transcriptionService.progressPercent * 100)
+            return percent > 0 ? "Transcribing \(percent)%" : "Transcribing…"
+        }
+        if let position = transcriptionService.queuePosition(of: recordingID) {
+            return "Queued · #\(position)"
+        }
+        return "Processing…"
     }
 
     private func pill(_ text: String, tint: Color) -> some View {
@@ -80,6 +96,25 @@ struct PendingTranscriptionView: View {
     let defaultEngine: TranscriptionEngineKind
     let onStart: (TranscriptionEngineKind) -> Void
 
+    /// Held between the press and the queue picking the job up, so the button
+    /// reads as "working on it" from the first frame. The transition is
+    /// normally instant; the timeout only matters when a start is refused
+    /// (unconfigured engine, audio still downloading from iCloud).
+    @State private var isStarting = false
+    @State private var startResetTask: Task<Void, Never>? = nil
+
+    private func start(_ kind: TranscriptionEngineKind) {
+        guard !isStarting else { return }
+        isStarting = true
+        onStart(kind)
+        startResetTask?.cancel()
+        startResetTask = Task {
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            isStarting = false
+        }
+    }
+
     var body: some View {
         VStack(spacing: 20) {
             ZStack {
@@ -101,27 +136,42 @@ struct PendingTranscriptionView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 300)
             Menu {
-                TranscribeEngineMenuItems(recording: recording, onSelect: onStart)
+                TranscribeEngineMenuItems(recording: recording, onSelect: start)
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: "waveform.badge.mic")
-                    Text(recording.status.isResumable ? "Resume Transcription" : "Transcribe Now")
+                    if isStarting {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(.white)
+                        Text("Starting…")
+                    } else {
+                        Image(systemName: "waveform.badge.mic")
+                        Text(recording.status.isResumable ? "Resume Transcription" : "Transcribe Now")
+                    }
                 }
                 .font(.body.weight(.semibold))
                 .frame(width: 200, height: 40)
-                .background(AppTheme.heroGradient)
+                .background(isStarting ? AnyShapeStyle(Color.secondary.opacity(0.35)) : AnyShapeStyle(AppTheme.heroGradient))
                 .foregroundStyle(.white)
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             } primaryAction: {
-                onStart(defaultEngine)
+                start(defaultEngine)
             }
             .menuStyle(.button)
             .buttonStyle(.plain)
             .fixedSize()
+            .disabled(isStarting)
 
-            Text("Using \(defaultEngine.displayName) — hold for other engines")
+            Text(isStarting
+                 ? "Preparing \(defaultEngine.displayName)…"
+                 : "Using \(defaultEngine.displayName) — hold for other engines")
                 .font(.caption)
                 .foregroundStyle(.quaternary)
+        }
+        .onDisappear { startResetTask?.cancel() }
+        .onChange(of: recording.id) { _, _ in
+            startResetTask?.cancel()
+            isStarting = false
         }
     }
 }
@@ -145,14 +195,28 @@ struct ActiveTranscriptionView: View {
                 .foregroundStyle(.secondary)
 
             VStack(spacing: 8) {
-                ProgressView(value: transcriptionService.progressPercent)
-                    .progressViewStyle(.linear)
-                    .tint(AppTheme.processing)
-                    .frame(maxWidth: 300)
+                // Model loading and audio decoding happen before there is any
+                // fraction to report; a stuck 0% bar reads as "nothing is
+                // happening", which is exactly the wrong impression.
+                if transcriptionService.progressPercent > 0 {
+                    ProgressView(value: min(1, transcriptionService.progressPercent))
+                        .progressViewStyle(.linear)
+                        .tint(AppTheme.processing)
+                        .frame(maxWidth: 300)
 
-                Text("\(Int(transcriptionService.progressPercent * 100))%")
-                    .font(.caption.weight(.medium).monospacedDigit())
-                    .foregroundStyle(.tertiary)
+                    Text("\(Int(transcriptionService.progressPercent * 100))% complete")
+                        .font(.caption.weight(.medium).monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                } else {
+                    ProgressView()
+                        .progressViewStyle(.linear)
+                        .tint(AppTheme.processing)
+                        .frame(maxWidth: 300)
+
+                    Text("Getting started…")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.tertiary)
+                }
             }
 
             Text(transcriptionService.etaText ?? "Estimating time remaining…")

@@ -334,7 +334,7 @@ struct HomeRecordingRow: View {
             .font(.caption)
             .foregroundStyle(.secondary)
             HStack(spacing: 6) {
-                StatusPill(status: recording.status)
+                StatusPill(status: recording.status, recordingID: recording.id)
                 CloudSyncBadge(recording: recording)
                 if let progress = store.compressingProgress[recording.id] {
                     ProgressView(value: progress)

@@ -423,6 +423,9 @@ struct RecordingRow: View {
             let pct = Int(transcriptionService.progressPercent * 100)
             return pct > 0 ? "\(pct)%" : "Processing"
         }
+        if let position = transcriptionService.queuePosition(of: recording.id) {
+            return "#\(position)"
+        }
         return "Queued"
     }
 

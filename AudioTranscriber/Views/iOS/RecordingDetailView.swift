@@ -119,7 +119,7 @@ struct RecordingDetailView: View {
                     Label(recording.durationString, systemImage: "clock")
                         .labelStyle(.titleOnly)
                     Text(recording.formatAndSizeLabel)
-                    StatusPill(status: recording.status)
+                    StatusPill(status: recording.status, recordingID: recording.id)
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
