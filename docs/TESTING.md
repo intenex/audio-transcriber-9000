@@ -4,7 +4,9 @@ What exists, how to run it, and what "verified" means in this project. See [DEVE
 
 ## Test suites (Tests/AudioTranscriberTests/, `@testable import AudioTranscriber`)
 
-**Unit — always run, no network, no models (as of 2026-08-22: totals incl. skipped gated suites are 299 on macOS / 296 on the iOS simulator). On a real iPhone the same 296 run with only 7 skipped, because the device has the app-container marker (gated real-mic recorder, real-model local-engine, and real-container scan suites run there).**
+**Unit — always run, no network, no models (as of 2026-08-22: totals incl. skipped gated suites are 300 on macOS / 297 on the iOS simulator). On a real iPhone the same 297 run with only 7 skipped, because the device has the app-container marker (gated real-mic recorder, real-model local-engine, and real-container scan suites run there).**
+
+**UI (XCUITest, iOS only — `AudioTranscriberUITestsiOS`, `Tests/AudioTranscriberUITests/`)** drives the shipped app the way a person does. `RecordFlowUITests`: the app launches and is still in the foreground 15 s later (the launch watchdog kills at 10 s), the home list shows more than a single row when the library isn't empty (it skips with that reason when it is), and **pressing Record brings up the recording surface** — then leaves via Done without capturing anything, because on a device this runs against the real library. Run it with `-destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:AudioTranscriberUITestsiOS`. On a physical iPhone the runner needs **Settings → Privacy & Security → Developer → Enable UI Automation**; without it every device run fails with "Timed out while enabling automation mode", so the simulator run is the authoritative one and the device is covered by the in-process suites plus a launch-and-inspect pass (below).
 
 | Suite | Covers |
 |---|---|
@@ -66,7 +68,28 @@ rm /tmp/audiotranscriber-integration-tests
 > ```
 > The device id for `-destination` comes from `-showdestinations` and differs from the `devicectl` UUID. Delete the marker (Files.app → the app's folder) when done. A freshly installed build has **no microphone TCC grant** — launch the app once and tap Allow, or every recorder test records digital silence.
 >
+> **Wake the phone right before the recorder suites.** iOS will not start microphone capture for a process that is in the background, so once the display sleeps every `RecorderSpoolIntegrationTests` case fails with "recording never started — mic permission?" even though the grant is fine. A `launch` before `xcodebuild test` is not enough — the incremental build eats the awake window. Build first, wake second, run third:
+> ```bash
+> xcodebuild … -destination "platform=iOS,id=<id>" -allowProvisioningUpdates build-for-testing
+> xcrun devicectl device process launch --device <uuid> --terminate-existing com.audiortranscriber.AudioTranscriber.ios
+> xcodebuild … -destination "platform=iOS,id=<id>" test-without-building \
+>   -only-testing:AudioTranscriberTestsiOS/RecorderSpoolIntegrationTests
+> ```
+> Run the rest of the suite separately (`-skip-testing:AudioTranscriberTestsiOS/RecorderSpoolIntegrationTests`) so a four-minute pass can't put the device to sleep in the middle of the mic tests.
+>
 > `LocalEngineIntegrationTests` falls back to `Documents/test_recording.wav` in the app container when the repo fixture isn't reachable, so the same `devicectl device copy to` trick runs the real transcription pipeline on the phone (first run downloads ~1.5 GB of models onto the device).
+
+> **Launch-and-inspect pass on the phone** (what caught the launch-watchdog kill, and how to confirm a fix without XCUITest):
+> ```bash
+> xcrun devicectl device install app --device <uuid> "<DerivedData>/Build/Products/Debug-iphoneos/Audio Transcriber 9000.app"
+> xcrun devicectl device process launch --device <uuid> --terminate-existing com.audiortranscriber.AudioTranscriber.ios
+> sleep 30 && xcrun devicectl device info processes --device <uuid> | grep -i transcrib   # still alive?
+> # what the app itself thinks its library is:
+> xcrun devicectl device copy from --device <uuid> --domain-type appDataContainer \
+>   --domain-identifier com.audiortranscriber.AudioTranscriber.ios --user mobile \
+>   --source "Library/Application Support/AudioTranscriber/Cache/recordings-cloud.json" --destination ./cloud.json
+> ```
+> A watchdog kill leaves a report in `~/Library/Logs/CrashReporter/MobileDevice/<device name>/` — `.ips` files are JSON; the second line parses with `json.loads` and the triggered thread's frames name the blocking call. `EXC_CRASH (SIGKILL)` + `0x8BADF00D` + "scene-update watchdog transgression" means the main thread was blocked, not that the code threw.
 
 > **Quit any running Audio Transcriber 9000 instance before running tests** — not just the gated recorder ones. `KeychainFieldLiveTests` drives a real field editor inside an NSWindow in the test host and fails (`testEmptyingFieldDoesNotDeleteStoredKey`) when another instance holds the key window; it passes immediately once the app is quit. And for the recorder suites: Tests run inside a fully live app (AppBootstrap wires the real stores), and a SECOND running instance shares the global spool: its cloud-watcher reloads sweep the spool and once adopted the test recorder's live segment files into the user's REAL iCloud library mid-test (0-bytes-on-disk failures, junk `segN.m4a` files in the container). The sweep now has stem + mtime guards, but an old binary (e.g. a stale /Applications copy) predates them.
 

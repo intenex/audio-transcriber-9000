@@ -107,6 +107,19 @@ targets:
         BUNDLE_LOADER: "$(TEST_HOST)"
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Audio Transcriber 9000.app/Contents/MacOS/Audio Transcriber 9000"
 
+  AudioTranscriberUITestsiOS:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - Tests/AudioTranscriberUITests
+    dependencies:
+      - target: AudioTranscriber9000iOS
+    settings:
+      base:
+        PRODUCT_NAME: AudioTranscriberUITestsiOS
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: AudioTranscriber9000iOS
+
   AudioTranscriberTestsiOS:
     type: bundle.unit-test
     platform: iOS
@@ -144,3 +157,4 @@ schemes:
       config: Debug
       targets:
         - AudioTranscriberTestsiOS
+        - AudioTranscriberUITestsiOS

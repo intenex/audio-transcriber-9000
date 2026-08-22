@@ -50,6 +50,17 @@
                ReferencedContainer = "container:AudioTranscriber9000.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "24B89D1416E361365533A942"
+               BuildableName = "AudioTranscriberUITestsiOS.xctest"
+               BlueprintName = "AudioTranscriberUITestsiOS"
+               ReferencedContainer = "container:AudioTranscriber9000.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
       <CommandLineArguments>
       </CommandLineArguments>

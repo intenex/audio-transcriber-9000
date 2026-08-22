@@ -689,6 +689,7 @@ final class AudioRecorder: NSObject {
             stopPlayback()
             return
         }
+        guard !isStillInTheCloud(recording) else { return }
         stopPlayback()
         do {
             #if os(iOS)
@@ -707,12 +708,23 @@ final class AudioRecorder: NSObject {
         }
     }
 
+    /// The floor under every playback entry point: opening a file whose bytes
+    /// are still in iCloud blocks the main thread for the whole download.
+    /// Ask for it and say so; the row badges and menus show the progress.
+    private func isStillInTheCloud(_ recording: Recording) -> Bool {
+        guard CloudPlaceholder.isPlaceholderOnly(recording.fileURL) else { return false }
+        CloudPlaceholder.requestDownload(recording.fileURL)
+        errorMessage = "“\(recording.displayName)” is still in iCloud — downloading it now. Try again in a moment."
+        return true
+    }
+
     func seekAndPlay(to time: TimeInterval, recording: Recording) {
         if isPlaying, playingRecordingID == recording.id, let player = audioPlayer {
             player.currentTime = time
             playbackTime = time
             return
         }
+        guard !isStillInTheCloud(recording) else { return }
         stopPlayback()
         do {
             #if os(iOS)

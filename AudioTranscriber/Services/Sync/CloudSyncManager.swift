@@ -96,20 +96,25 @@ final class CloudSyncManager {
     }
 
     /// Resolve NSFileVersion conflicts across every known library file.
+    ///
+    /// One coordinated `unresolvedConflictVersionsOfItem` call per file, seven
+    /// files per recording — cheap each, and far too much to do on the main
+    /// thread with a real library behind it. The URL list is snapshotted here;
+    /// the sweep runs off-main.
     func sweepConflicts() {
         guard let store = recordingStore else { return }
+        var urls: [URL] = []
         for recording in store.recordings {
-            ConflictResolver.resolveConflicts(at: recording.metaURL)
-            ConflictResolver.resolveConflicts(at: recording.speakersURL)
-            ConflictResolver.resolveConflicts(at: recording.markdownURL)
-            ConflictResolver.resolveConflicts(at: recording.segmentsURL)
-            ConflictResolver.resolveConflicts(at: recording.summaryURL)
-            ConflictResolver.resolveConflicts(at: recording.chatURL)
-            ConflictResolver.resolveConflicts(at: recording.fileURL)
+            urls.append(contentsOf: [recording.metaURL, recording.speakersURL,
+                                     recording.markdownURL, recording.segmentsURL,
+                                     recording.summaryURL, recording.chatURL,
+                                     recording.fileURL])
         }
-        ConflictResolver.resolveConflicts(at: store.storageDirectory.appendingPathComponent("library.json"))
-        if let library = speakerLibrary {
-            ConflictResolver.resolveConflicts(at: library.libraryURL)
+        urls.append(store.storageDirectory.appendingPathComponent("library.json"))
+        if let library = speakerLibrary { urls.append(library.libraryURL) }
+        let snapshot = urls
+        Task.detached(priority: .utility) {
+            for url in snapshot { ConflictResolver.resolveConflicts(at: url) }
         }
     }
 

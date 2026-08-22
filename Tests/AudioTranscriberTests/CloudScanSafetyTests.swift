@@ -180,6 +180,20 @@ final class CloudScanSafetyTests: XCTestCase {
         XCTAssertEqual(library.speakers.count, 1, "an unreadable cloud file must not wipe the library")
     }
 
+    func testPlaybackRefusesAFileThatIsStillInTheCloud() throws {
+        let audio = dir.appendingPathComponent("not-here-yet.m4a")
+        makeStub(for: audio)
+        let recording = Recording(fileURL: audio, date: .now, duration: 30, name: "Evicted")
+
+        let recorder = AudioRecorder()
+        recorder.playRecording(recording)
+
+        XCTAssertFalse(recorder.isPlaying,
+                       "opening a cloud placeholder would block the main thread for the whole download")
+        XCTAssertTrue(recorder.errorMessage?.contains("iCloud") == true,
+                      "and the user is told why — got \(recorder.errorMessage ?? "nothing")")
+    }
+
     func testAsyncLoadReturnsTheSameLibraryAsTheSynchronousOne() async throws {
         for i in 0..<12 {
             let audio = dir.appendingPathComponent("rec\(i).m4a")

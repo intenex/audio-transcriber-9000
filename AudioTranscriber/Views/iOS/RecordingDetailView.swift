@@ -354,36 +354,40 @@ struct RecordingDetailView: View {
 
     private var speakerNamesURL: URL { recording.speakersURL }
 
+    /// Every sidecar read happens off the main thread. In the iCloud library
+    /// these files can be dataless — opening one materializes it, which is
+    /// exactly right when the user just tapped this recording, and exactly
+    /// wrong on the main thread (a blocked scene update is a watchdog kill).
     private func loadSidecars() {
-        guard let url = recording.transcriptionURL else {
-            markdownContent = nil
-            segments = nil
-            loadedSummary = SummarizationService.loadSummary(for: recording)
-            return
-        }
+        let markdownURL = recording.transcriptionURL
         let segmentsURL = recording.segmentsURL
+        let speakersURL = speakerNamesURL
+        let target = recording
         DispatchQueue.global(qos: .userInitiated).async {
-            let content = try? String(contentsOf: url, encoding: .utf8)
-            let segs: [TranscriptionSegment]? = {
+            let content = markdownURL.flatMap { try? String(contentsOf: $0, encoding: .utf8) }
+            let segs: [TranscriptionSegment]? = markdownURL == nil ? nil : {
                 guard let data = try? Data(contentsOf: segmentsURL) else { return nil }
                 return try? JSONDecoder().decode([TranscriptionSegment].self, from: data)
             }()
+            let summary = SummarizationService.loadSummary(for: target)
+            let names = (try? Data(contentsOf: speakersURL))
+                .flatMap { try? JSONDecoder().decode([String: String].self, from: $0) } ?? [:]
             DispatchQueue.main.async {
                 markdownContent = content
                 segments = segs
+                loadedSummary = summary
+                speakerNames = names
             }
         }
-        loadedSummary = SummarizationService.loadSummary(for: recording)
-        loadSpeakerNames()
     }
 
     private func loadSpeakerNames() {
-        guard let data = try? Data(contentsOf: speakerNamesURL),
-              let names = try? JSONDecoder().decode([String: String].self, from: data) else {
-            speakerNames = [:]
-            return
+        let speakersURL = speakerNamesURL
+        DispatchQueue.global(qos: .userInitiated).async {
+            let names = (try? Data(contentsOf: speakersURL))
+                .flatMap { try? JSONDecoder().decode([String: String].self, from: $0) } ?? [:]
+            DispatchQueue.main.async { speakerNames = names }
         }
-        speakerNames = names
     }
 
     private func saveSpeakerNames() {
