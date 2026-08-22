@@ -25,9 +25,11 @@ struct CloudSyncSection: View {
                         .font(.subheadline.weight(.medium))
                     Spacer()
                     Button("Turn Off") {
-                        LibraryMigrator.disableSync(store: store,
-                                                    speakerLibrary: speakerLibrary,
-                                                    cloudSync: cloudSync)
+                        Task {
+                            await LibraryMigrator.disableSync(store: store,
+                                                              speakerLibrary: speakerLibrary,
+                                                              cloudSync: cloudSync)
+                        }
                     }
                     .buttonStyle(.bordered)
                 }

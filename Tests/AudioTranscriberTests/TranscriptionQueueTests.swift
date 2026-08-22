@@ -215,7 +215,7 @@ final class TranscriptionQueueTests: XCTestCase {
         await waitUntil { self.service.isActive(recording.id) }
         XCTAssertTrue(store.inFlightTranscriptionIDs.contains(recording.id))
 
-        store.reloadFromStorageDirectory()
+        await store.reloadFromStorageDirectory()
         XCTAssertEqual(store.recording(with: recording.id)?.status, .processing,
                        "a mid-job reload must not roll the live job back")
         XCTAssertTrue(service.isActive(recording.id), "and the job itself keeps running")
@@ -242,13 +242,13 @@ final class TranscriptionQueueTests: XCTestCase {
 
         service.cancel(second.id)
         XCTAssertFalse(store.inFlightTranscriptionIDs.contains(second.id))
-        store.reloadFromStorageDirectory()
+        await store.reloadFromStorageDirectory()
         XCTAssertEqual(store.recording(with: second.id)?.status, .pending)
 
         service.cancel(first.id)
         await waitUntil { self.store.inFlightTranscriptionIDs.isEmpty }
         XCTAssertTrue(store.inFlightTranscriptionIDs.isEmpty)
-        store.reloadFromStorageDirectory()
+        await store.reloadFromStorageDirectory()
         XCTAssertEqual(store.recording(with: first.id)?.status, .pending)
     }
 }

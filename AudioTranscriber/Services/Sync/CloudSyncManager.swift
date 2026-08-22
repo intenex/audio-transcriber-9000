@@ -54,7 +54,7 @@ final class CloudSyncManager {
             // now that the container is known.
             if let store = recordingStore,
                store.storageDirectory.standardizedFileURL != url.standardizedFileURL {
-                store.reloadFromStorageDirectory()
+                await store.reloadFromStorageDirectory()
                 speakerLibrary?.attach(storageDirectory: store.storageDirectory)
             }
             startWatching()
@@ -88,7 +88,7 @@ final class CloudSyncManager {
         reloadDebounce = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(800))
             guard !Task.isCancelled, let self else { return }
-            self.recordingStore?.reloadFromStorageDirectory()
+            await self.recordingStore?.reloadFromStorageDirectory()
             self.speakerLibrary?.load()
             self.sweepConflicts()
             self.stateVersion += 1

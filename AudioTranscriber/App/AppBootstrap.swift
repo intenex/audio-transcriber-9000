@@ -27,7 +27,12 @@ enum AppBootstrap {
             synced.activate()
             syncedDefaults = synced
         }
-        recordingStore.load()
+        // The directory resolves synchronously (cheap) so everything wired
+        // below sees the final value; the library SCAN runs off the main
+        // thread — in cloud mode it reads the ubiquity container, and a
+        // blocking scan there killed the iOS app on the launch watchdog.
+        recordingStore.prepareStorageDirectory()
+        Task { await recordingStore.loadAsync() }
         if let cloudSync {
             cloudSync.attach(recordingStore: recordingStore, speakerLibrary: speakerLibrary)
             Task { await cloudSync.bootstrap() }

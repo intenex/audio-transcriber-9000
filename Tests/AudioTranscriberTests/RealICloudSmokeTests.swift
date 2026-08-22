@@ -103,7 +103,7 @@ final class RealICloudSmokeTests: XCTestCase {
         XCTAssertTrue(state == .uploading || state == .current,
                       "expected uploading/current from the real engine, got \(state)")
 
-        LibraryMigrator.disableSync(store: store, speakerLibrary: speakerLibrary, cloudSync: cloudSync)
+        await LibraryMigrator.disableSync(store: store, speakerLibrary: speakerLibrary, cloudSync: cloudSync)
         XCTAssertEqual(store.storageDirectory.standardizedFileURL, localDir.standardizedFileURL)
     }
 }

@@ -95,7 +95,7 @@ enum LibraryMigrator {
         //    setting still points at it, so disabling sync returns there).
         status("Switching to the iCloud library…")
         cloudSync.isEnabled = true
-        store.reloadFromStorageDirectory()
+        await store.reloadFromStorageDirectory()
         speakerLibrary.attach(storageDirectory: store.storageDirectory)
         cloudSync.startWatching()
         status("iCloud sync is on.")
@@ -105,10 +105,10 @@ enum LibraryMigrator {
     /// already in iCloud stay there (nothing is deleted).
     static func disableSync(store: RecordingStore,
                             speakerLibrary: SpeakerLibraryStore,
-                            cloudSync: CloudSyncManager) {
+                            cloudSync: CloudSyncManager) async {
         cloudSync.stopWatching()
         cloudSync.isEnabled = false
-        store.reloadFromStorageDirectory()
+        await store.reloadFromStorageDirectory()
         speakerLibrary.attach(storageDirectory: store.storageDirectory)
     }
 

@@ -58,8 +58,51 @@ enum CloudPlaceholder {
             || FileManager.default.fileExists(atPath: placeholderURL(for: fileURL).path)
     }
 
+    /// True when the bytes are on THIS device.
+    ///
+    /// A current iCloud item usually keeps its real name and turns *dataless*:
+    /// it stats normally, reports its full size, and materializes on the first
+    /// read — which blocks the calling thread until the download finishes.
+    /// (The hidden ".<name>.icloud" stub is the older shape and still occurs.)
+    /// Anything on a hot path must ask this before reading; on iOS a library
+    /// scan that ignored it exhausted the 10-second scene-update watchdog and
+    /// the app was killed on every launch.
+    static func isDownloaded(_ fileURL: URL) -> Bool {
+        guard let values = try? fileURL.resourceValues(
+                forKeys: [.isUbiquitousItemKey, .ubiquitousItemDownloadingStatusKey]),
+              values.isUbiquitousItem == true else {
+            // Not an iCloud item (or gone): local files read without blocking.
+            return FileManager.default.fileExists(atPath: fileURL.path)
+        }
+        switch values.ubiquitousItemDownloadingStatus {
+        case .some(.current), .some(.downloaded): return true
+        default: return false
+        }
+    }
+
+    /// The file's contents, but only when reading cannot block on a download.
+    static func dataIfDownloaded(_ fileURL: URL) -> Data? {
+        guard isDownloaded(fileURL) else { return nil }
+        return try? Data(contentsOf: fileURL)
+    }
+
+    /// True when the item is known to the library but its content still has to
+    /// come down — the caller should ask for it and try again later.
+    static func awaitingDownload(_ fileURL: URL) -> Bool {
+        existsIncludingPlaceholder(fileURL) && !isDownloaded(fileURL)
+    }
+
+    /// Ask iCloud to fetch a file in the background. Cheap, idempotent, never
+    /// blocks; a no-op for files that aren't ubiquitous.
+    static func requestDownload(_ fileURL: URL) {
+        try? FileManager.default.startDownloadingUbiquitousItem(at: fileURL)
+    }
+
     static func isPlaceholderOnly(_ fileURL: URL) -> Bool {
-        !FileManager.default.fileExists(atPath: fileURL.path)
-            && FileManager.default.fileExists(atPath: placeholderURL(for: fileURL).path)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            return FileManager.default.fileExists(atPath: placeholderURL(for: fileURL).path)
+        }
+        // Present in name only: reading would block on the download.
+        return !isDownloaded(fileURL)
     }
 }

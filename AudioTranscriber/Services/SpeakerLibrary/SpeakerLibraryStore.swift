@@ -54,7 +54,14 @@ final class SpeakerLibraryStore {
         try? FileManager.default.createDirectory(at: clipsDirectory, withIntermediateDirectories: true)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        guard let data = try? Data(contentsOf: libraryURL),
+        // Still in iCloud: reading would block on the download, and treating
+        // that as "no speakers" would wipe the in-memory library. Ask for it
+        // and keep what we have — the sync watcher reloads when it lands.
+        if CloudPlaceholder.awaitingDownload(libraryURL) {
+            CloudPlaceholder.requestDownload(libraryURL)
+            return
+        }
+        guard let data = CloudPlaceholder.dataIfDownloaded(libraryURL),
               let library = try? decoder.decode(Library.self, from: data) else {
             speakers = []
             return

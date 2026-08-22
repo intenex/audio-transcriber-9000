@@ -78,22 +78,156 @@ final class RecordingStore {
 
     // MARK: - Load / migrate
 
-    func load() {
+    /// Everything the scan needs, captured on the main actor so the scan
+    /// itself can run anywhere.
+    private struct ScanInput: Sendable {
+        let storageDirectory: URL
+        let manifestURL: URL
+        let libraryFileURL: URL
+        let legacyDefaultsData: Data?
+        let activeRecordingURL: URL?
+        let inFlightTranscriptionIDs: Set<UUID>
+        /// Last resort: take an audio file into the library even though its
+        /// identity sidecar never arrived (see `sidecarRetryLimit`).
+        let adoptWithoutSidecars: Bool
+    }
+
+    private struct ScanResult: Sendable {
+        let recordings: [Recording]
+        let categories: [String]
+        /// Audio files held back because their `.meta.json` is still coming
+        /// down from iCloud. Nonzero means "ask again shortly".
+        let awaitingSidecars: Int
+    }
+
+    /// Bumped by every load so a slow scan can tell it has been superseded.
+    private var loadGeneration = 0
+
+    // A fresh device sees the whole library as cloud placeholders and has to
+    // wait for each identity sidecar to download. iCloud's change
+    // notifications do not reliably announce a completed download, so the
+    // store asks again itself until nothing is pending.
+    private var sidecarRetry: Task<Void, Never>? = nil
+    private var sidecarRetriesUsed = 0
+    private var gaveUpOnSidecars = false
+    /// Test seams — the defaults are what ships.
+    var sidecarRetryDelay: TimeInterval = 1.5
+    var sidecarRetryLimit = 15
+
+    /// Resolve (and create) the storage directory without touching the
+    /// library. Cheap and synchronous — safe to call before an async load so
+    /// everything wired to `storageDirectory` sees the final value at once.
+    func prepareStorageDirectory() {
         storageDirectory = fixedStorageDirectory ?? Self.resolveStorageDirectory(defaults: defaults)
         try? FileManager.default.createDirectory(at: storageDirectory, withIntermediateDirectories: true)
+    }
+
+    func load() {
+        resetSidecarRetries()
+        prepareStorageDirectory()
+        loadGeneration &+= 1
+        apply(Self.scanLibrary(makeScanInput()))
+    }
+
+    /// `load()` with the disk work off the main thread.
+    ///
+    /// Every app-side launch and reload goes through this. In cloud mode the
+    /// library IS the ubiquity container, where a scan can be slow enough to
+    /// exhaust iOS's 10-second scene-update watchdog — which killed the iOS
+    /// app on every launch until this existed (docs/DEVELOPMENT.md).
+    func loadAsync() async {
+        resetSidecarRetries()
+        await loadAsyncKeepingRetryBudget()
+    }
+
+    private func loadAsyncKeepingRetryBudget() async {
+        prepareStorageDirectory()
+        loadGeneration &+= 1
+        let generation = loadGeneration
+        let input = makeScanInput()
+        let result = await Task.detached(priority: .userInitiated) {
+            Self.scanLibrary(input)
+        }.value
+        // A newer load started while this one scanned (a storage-directory
+        // change, say) — that one's result is the truth, not this one's.
+        guard generation == loadGeneration else { return }
+        apply(result)
+    }
+
+    private func makeScanInput() -> ScanInput {
+        ScanInput(storageDirectory: storageDirectory,
+                  manifestURL: manifestURL,
+                  libraryFileURL: libraryFileURL,
+                  legacyDefaultsData: defaults.data(forKey: Self.legacyDefaultsKey),
+                  activeRecordingURL: activeRecordingURL,
+                  inFlightTranscriptionIDs: inFlightTranscriptionIDs,
+                  adoptWithoutSidecars: gaveUpOnSidecars)
+    }
+
+    private func apply(_ result: ScanResult) {
+        recordings = result.recordings
+        categories = result.categories
+        saveNow()
+        if result.awaitingSidecars > 0 {
+            scheduleSidecarRetry(pending: result.awaitingSidecars)
+        } else {
+            resetSidecarRetries()
+        }
+    }
+
+    private func resetSidecarRetries() {
+        sidecarRetry?.cancel()
+        sidecarRetry = nil
+        sidecarRetriesUsed = 0
+        gaveUpOnSidecars = false
+    }
+
+    /// Look again once the sidecars have had time to land. Backs off, and
+    /// after the budget is spent takes the recordings in regardless — a
+    /// sidecar that is never coming must not hide a recording forever.
+    private func scheduleSidecarRetry(pending: Int) {
+        sidecarRetry?.cancel()
+        if sidecarRetriesUsed >= sidecarRetryLimit {
+            guard !gaveUpOnSidecars else { return }
+            NSLog("[RecordingStore] \(pending) sidecar(s) never arrived — adopting without them")
+            gaveUpOnSidecars = true
+        } else {
+            sidecarRetriesUsed += 1
+        }
+        let delay = min(10.0, sidecarRetryDelay * Double(max(1, sidecarRetriesUsed)))
+        sidecarRetry = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled, let self else { return }
+            await self.loadAsyncKeepingRetryBudget()
+        }
+    }
+
+    /// The whole library scan: manifest, durable `.meta.json` sidecars, spool
+    /// salvage, orphan adoption, checkpoint migration, status repair.
+    ///
+    /// Pure disk work over a value-typed input, so it runs on the main thread
+    /// (tests, `load()`) or a background one (`loadAsync()`) unchanged. It
+    /// must never materialize an iCloud item — see CloudPlaceholder.
+    nonisolated private static func scanLibrary(_ input: ScanInput) -> ScanResult {
+        let storageDirectory = input.storageDirectory
 
         // Salvage finalized-but-unmoved recordings from the spool (crash
         // between finalize and move); orphan adoption below picks them up.
-        sweepSpool()
+        sweepSpool(storageDirectory: storageDirectory,
+                   activeRecordingURL: input.activeRecordingURL)
 
         var loaded: [Recording] = []
         var loadedCategories: [String] = []
 
-        if let data = try? Data(contentsOf: manifestURL),
-           let manifest = try? Self.decoder().decode(RecordingManifest.self, from: data) {
+        if let data = try? Data(contentsOf: input.manifestURL),
+           let manifest = try? decoder().decode(RecordingManifest.self, from: data) {
             loadedCategories = manifest.categories
             loaded = manifest.recordings.compactMap { $0.toRecording(storageDirectory: storageDirectory) }
-        } else if let legacy = migrateLegacyDefaultsIfPresent() {
+        } else if let legacy = input.legacyDefaultsData.flatMap({
+            try? JSONDecoder().decode([Recording].self, from: $0)
+        }) {
+            // Leave the legacy defaults key in place as a rollback backup; the
+            // presence of recordings.json is the migration marker.
             loaded = legacy
         }
 
@@ -105,11 +239,12 @@ final class RecordingStore {
         // iCloud placeholder counts as existing — evicted ≠ deleted.
         loaded = loaded.filter { CloudPlaceholder.existsIncludingPlaceholder($0.fileURL) }
 
-        // Orphan adoption: any .wav in the storage dir not in the manifest becomes a recording.
+        // Orphan adoption: any audio file in the storage dir not in the
+        // manifest becomes a recording.
         let known = Set(loaded.map { $0.fileURL.standardizedFileURL.path })
-        for orphan in orphanAudioFiles(excluding: known) {
-            loaded.append(orphan)
-        }
+        let adoption = orphanAudioFiles(in: storageDirectory, excluding: known,
+                                        adoptWithoutSidecars: input.adoptWithoutSidecars)
+        loaded.append(contentsOf: adoption.orphans)
 
         // Migrate legacy in-library checkpoints (<stem>.partial.json) to the
         // device-local ID-keyed location.
@@ -133,7 +268,7 @@ final class RecordingStore {
             let recording = loaded[idx]
             // A job this process is running right now is not stale state — it
             // simply hasn't written its checkpoint or transcript yet.
-            if inFlightTranscriptionIDs.contains(recording.id) {
+            if input.inFlightTranscriptionIDs.contains(recording.id) {
                 loaded[idx].status = .processing
                 continue
             }
@@ -163,15 +298,17 @@ final class RecordingStore {
         // Fill in missing file sizes (cheap stat calls, cached in the manifest).
         // Placeholders keep whatever the meta sidecar knew.
         for idx in loaded.indices where loaded[idx].fileSizeBytes == nil {
-            let size = Self.fileSize(of: loaded[idx].fileURL)
+            let size = fileSize(of: loaded[idx].fileURL)
             if size > 0 { loaded[idx].fileSizeBytes = size }
         }
 
         // Heal stale durations: data migrated from the old app carried
         // timer-accumulated durations that can be wildly wrong (a 2h07m file
-        // stored as 4h05m). The audio header is the truth.
+        // stored as 4h05m). The audio header is the truth — when it is on this
+        // device; reading a cloud placeholder's header would pull the whole
+        // file down (gigabytes, over cellular).
         for idx in loaded.indices {
-            let actual = Self.audioDuration(for: loaded[idx].fileURL)
+            let actual = audioDurationIfDownloaded(for: loaded[idx].fileURL)
             guard actual > 0 else { continue }
             let stored = loaded[idx].duration
             if abs(stored - actual) > max(2.0, actual * 0.02) {
@@ -182,48 +319,46 @@ final class RecordingStore {
 
         // Categories: union of manifest cache, the synced library.json master
         // list, and whatever adopted recordings reference.
-        if let data = try? Data(contentsOf: libraryFileURL),
-           let file = try? Self.decoder().decode(LibraryFile.self, from: data) {
+        if let data = CloudPlaceholder.dataIfDownloaded(input.libraryFileURL),
+           let file = try? decoder().decode(LibraryFile.self, from: data) {
             for cat in file.categories where !loadedCategories.contains(cat) {
                 loadedCategories.append(cat)
             }
+        } else if CloudPlaceholder.awaitingDownload(input.libraryFileURL) {
+            CloudPlaceholder.requestDownload(input.libraryFileURL)
         }
         for cat in loaded.compactMap(\.category).sorted() where !loadedCategories.contains(cat) {
             loadedCategories.append(cat)
         }
 
-        recordings = loaded.sorted { $0.date > $1.date }
-        categories = loadedCategories
-        saveNow()
+        let sorted = loaded.sorted { $0.date > $1.date }
 
         // Backfill/refresh .meta.json sidecars (no-op when content is current).
-        for recording in recordings {
-            writeMetaIfChanged(for: recording)
+        for recording in sorted {
+            Self.writeMetaIfChanged(for: recording)
         }
+
+        return ScanResult(recordings: sorted, categories: loadedCategories,
+                          awaitingSidecars: adoption.awaitingSidecars)
     }
 
     /// Re-resolve the storage directory from settings and reload the library
-    /// (used when the user changes the storage location).
-    func reloadFromStorageDirectory() {
+    /// (used when the user changes the storage location, and by the iCloud
+    /// watcher when another device changes something).
+    func reloadFromStorageDirectory() async {
         saveTask?.cancel()
-        load()
+        await loadAsync()
     }
 
-    private func migrateLegacyDefaultsIfPresent() -> [Recording]? {
-        guard let data = defaults.data(forKey: Self.legacyDefaultsKey),
-              let saved = try? JSONDecoder().decode([Recording].self, from: data) else {
-            return nil
-        }
-        // Leave the legacy key in place as a rollback backup; the presence of
-        // recordings.json is the migration marker.
-        return saved
-    }
-
-    private func orphanAudioFiles(excluding known: Set<String>) -> [Recording] {
+    nonisolated private static func orphanAudioFiles(
+        in storageDirectory: URL, excluding known: Set<String>,
+        adoptWithoutSidecars: Bool = false
+    ) -> (orphans: [Recording], awaitingSidecars: Int) {
         let audioExtensions: Set<String> = ["wav", "mp3", "m4a", "aiff", "aac", "flac"]
+        var awaitingSidecars = 0
         guard let contents = try? FileManager.default.contentsOfDirectory(
             at: storageDirectory, includingPropertiesForKeys: [.creationDateKey], options: [.skipsHiddenFiles]
-        ) else { return [] }
+        ) else { return ([], 0) }
 
         var orphans: [Recording] = []
         for url in contents where audioExtensions.contains(url.pathExtension.lowercased()) {
@@ -235,8 +370,22 @@ final class RecordingStore {
             let markdown = url.deletingPathExtension().appendingPathExtension("md")
             let hasTranscript = FileManager.default.fileExists(atPath: markdown.path)
 
+            // A sidecar that exists but hasn't come down yet holds this
+            // file's real identity (UUID, name, category). Minting a fresh one
+            // now would only have to be taken back when the sidecar lands, and
+            // the UUID keys checkpoints and speaker references — ask for it
+            // and wait instead. (Asking is the whole point: without it the
+            // recording would never appear on a fresh device.)
+            if metaAwaitingDownload(besides: url) {
+                CloudPlaceholder.requestDownload(metaURL(besides: url))
+                if !adoptWithoutSidecars {
+                    awaitingSidecars += 1
+                    continue
+                }
+            }
+
             var recording: Recording
-            if let meta = Self.readMeta(besides: url) {
+            if let meta = readMeta(besides: url) {
                 // A .meta.json sibling restores full identity — same UUID,
                 // name, category, attribution — so a rebuilt (or synced-in)
                 // library is indistinguishable from the original.
@@ -247,7 +396,8 @@ final class RecordingStore {
                                       fileSizeBytes: meta.fileSizeBytes)
             } else {
                 let creation = (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .now
-                recording = Recording(fileURL: url, date: creation, duration: Self.audioDuration(for: url))
+                recording = Recording(fileURL: url, date: creation,
+                                      duration: audioDurationIfDownloaded(for: url))
             }
             if hasTranscript {
                 recording.transcriptionURL = markdown
@@ -270,7 +420,7 @@ final class RecordingStore {
             guard audioExtensions.contains(realURL.pathExtension.lowercased()),
                   !known.contains(path), !adopted.contains(path),
                   !FileManager.default.fileExists(atPath: realURL.path),
-                  let meta = Self.readMeta(besides: realURL) else { continue }
+                  let meta = readMeta(besides: realURL) else { continue }
             var recording = Recording(id: meta.id, fileURL: realURL, date: meta.date,
                                       duration: meta.duration,
                                       name: meta.name, category: meta.category,
@@ -282,7 +432,7 @@ final class RecordingStore {
             }
             orphans.append(recording)
         }
-        return orphans
+        return (orphans, awaitingSidecars)
     }
 
     // MARK: - Spool
@@ -291,19 +441,26 @@ final class RecordingStore {
     /// across volumes). On total failure the data stays in the spool and the
     /// spool URL is returned — never lose a finished recording.
     func finalizeRecordingFile(at spoolURL: URL) -> URL {
+        let outcome = Self.finalizeRecordingFile(at: spoolURL, storageDirectory: storageDirectory)
+        if let message = outcome.errorMessage { errorMessage = message }
+        return outcome.url
+    }
+
+    nonisolated private static func finalizeRecordingFile(
+        at spoolURL: URL, storageDirectory: URL
+    ) -> (url: URL, errorMessage: String?) {
         let dest = uniqueURL(for: storageDirectory.appendingPathComponent(spoolURL.lastPathComponent))
         do {
             try FileManager.default.moveItem(at: spoolURL, to: dest)
-            return dest
+            return (dest, nil)
         } catch {
             do {
                 try FileManager.default.copyItem(at: spoolURL, to: dest)
                 try? FileManager.default.removeItem(at: spoolURL)
-                return dest
+                return (dest, nil)
             } catch {
                 NSLog("[RecordingStore] Could not move recording into library: \(error)")
-                errorMessage = "The recording was saved to a temporary location but could not be moved into the library: \(error.localizedDescription)"
-                return spoolURL
+                return (spoolURL, "The recording was saved to a temporary location but could not be moved into the library: \(error.localizedDescription)")
             }
         }
     }
@@ -315,7 +472,8 @@ final class RecordingStore {
     /// active recording's stem is the recorder's, and anything modified in the
     /// last 60 s is presumed live (a real crash leftover is stale by the next
     /// load; a growing capture file's mtime is always fresh).
-    private func sweepSpool() {
+    nonisolated private static func sweepSpool(storageDirectory: URL,
+                                               activeRecordingURL: URL?) {
         guard let contents = try? FileManager.default.contentsOfDirectory(
             at: SpoolLocation.directory,
             includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey]
@@ -334,11 +492,11 @@ final class RecordingStore {
                 // An unfinalized container (interrupted stop/merge) carries
                 // audio data but no index — unplayable. Set it aside instead
                 // of showing a 0-second entry in the library.
-                guard Self.audioDuration(for: url) > 0 else {
+                guard audioDuration(for: url) > 0 else {
                     quarantineUnfinished(url)
                     continue
                 }
-                _ = finalizeRecordingFile(at: url)
+                _ = finalizeRecordingFile(at: url, storageDirectory: storageDirectory)
             } else {
                 // Header-only stubs and abandoned temp work files.
                 try? FileManager.default.removeItem(at: url)
@@ -347,7 +505,7 @@ final class RecordingStore {
     }
 
     /// Moves an unfinalized crash leftover out of the spool without deleting it.
-    private func quarantineUnfinished(_ url: URL) {
+    nonisolated private static func quarantineUnfinished(_ url: URL) {
         let directory = SpoolLocation.unfinishedDirectory
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let destination = uniqueURL(for: directory.appendingPathComponent(url.lastPathComponent))
@@ -361,17 +519,31 @@ final class RecordingStore {
 
     // MARK: - Metadata sidecars
 
-    private static func readMeta(besides audioURL: URL) -> RecordingMeta? {
-        let metaURL = audioURL.deletingPathExtension().appendingPathExtension("meta.json")
-        guard let data = try? Data(contentsOf: metaURL) else { return nil }
-        return try? Self.decoder().decode(RecordingMeta.self, from: data)
+    nonisolated private static func metaURL(besides audioURL: URL) -> URL {
+        audioURL.deletingPathExtension().appendingPathExtension("meta.json")
+    }
+
+    nonisolated private static func readMeta(besides audioURL: URL) -> RecordingMeta? {
+        let url = metaURL(besides: audioURL)
+        guard let data = CloudPlaceholder.dataIfDownloaded(url) else {
+            // Reading a not-yet-downloaded sidecar would block this thread on
+            // the network. Ask for it; the sync watcher reloads when it lands.
+            if CloudPlaceholder.awaitingDownload(url) { CloudPlaceholder.requestDownload(url) }
+            return nil
+        }
+        return try? decoder().decode(RecordingMeta.self, from: data)
+    }
+
+    /// The sidecar exists in the library but its content is still in iCloud.
+    nonisolated private static func metaAwaitingDownload(besides audioURL: URL) -> Bool {
+        CloudPlaceholder.awaitingDownload(metaURL(besides: audioURL))
     }
 
     /// Overlay the durable sidecar metadata onto a manifest entry. The
     /// sidecar wins for identity and user-edited fields; runtime state
     /// (status, transcriptionURL, fileURL) stays with the entry.
-    private func applyMetaIfPresent(to entry: Recording) -> Recording {
-        guard let meta = Self.readMeta(besides: entry.fileURL) else { return entry }
+    nonisolated private static func applyMetaIfPresent(to entry: Recording) -> Recording {
+        guard let meta = readMeta(besides: entry.fileURL) else { return entry }
         var merged = Recording(id: meta.id, fileURL: entry.fileURL, date: meta.date,
                                duration: meta.duration > 0 ? meta.duration : entry.duration,
                                transcriptionURL: entry.transcriptionURL, status: entry.status,
@@ -387,12 +559,18 @@ final class RecordingStore {
 
     /// Write `<stem>.meta.json` when its content differs from the recording
     /// (skipping no-ops keeps `updatedAt` an honest last-edit marker).
-    private func writeMetaIfChanged(for recording: Recording) {
-        let meta = RecordingMeta(recording: recording)
-        if let existing = Self.readMeta(besides: recording.fileURL), meta.sameContent(as: existing) {
+    nonisolated private static func writeMetaIfChanged(for recording: Recording) {
+        // A sidecar that hasn't come down yet can't be compared, and writing
+        // over it would clobber another device's edit with a guess.
+        guard !metaAwaitingDownload(besides: recording.fileURL) else {
+            CloudPlaceholder.requestDownload(metaURL(besides: recording.fileURL))
             return
         }
-        if let data = try? Self.encoder().encode(meta) {
+        let meta = RecordingMeta(recording: recording)
+        if let existing = readMeta(besides: recording.fileURL), meta.sameContent(as: existing) {
+            return
+        }
+        if let data = try? encoder().encode(meta) {
             try? AtomicFile.write(data, to: recording.metaURL)
         }
     }
@@ -424,7 +602,13 @@ final class RecordingStore {
 
         // Keep the synced categories master list current (skip no-op rewrites
         // so updatedAt stays an honest last-edit marker).
-        let existing = (try? Data(contentsOf: libraryFileURL))
+        // A master list still in iCloud can't be compared — writing over it
+        // would replace another device's categories with a guess.
+        if CloudPlaceholder.awaitingDownload(libraryFileURL) {
+            CloudPlaceholder.requestDownload(libraryFileURL)
+            return
+        }
+        let existing = CloudPlaceholder.dataIfDownloaded(libraryFileURL)
             .flatMap { try? Self.decoder().decode(LibraryFile.self, from: $0) }
         if existing?.categories != categories,
            let data = try? Self.encoder().encode(LibraryFile(categories: categories)) {
@@ -441,7 +625,7 @@ final class RecordingStore {
         }
         recordings.insert(entry, at: 0)
         recordings.sort { $0.date > $1.date }
-        writeMetaIfChanged(for: entry)
+        Self.writeMetaIfChanged(for: entry)
         save()
         onRecordingAdded?(entry.id)
     }
@@ -455,7 +639,7 @@ final class RecordingStore {
         if recordings[idx].metaURL != oldMetaURL {
             try? FileManager.default.removeItem(at: oldMetaURL)
         }
-        writeMetaIfChanged(for: recordings[idx])
+        Self.writeMetaIfChanged(for: recordings[idx])
         save()
     }
 
@@ -497,7 +681,7 @@ final class RecordingStore {
         }
         for rIdx in recordings.indices where recordings[rIdx].category == old {
             recordings[rIdx].category = trimmed
-            writeMetaIfChanged(for: recordings[rIdx])
+            Self.writeMetaIfChanged(for: recordings[rIdx])
         }
         save()
     }
@@ -506,7 +690,7 @@ final class RecordingStore {
         categories.removeAll { $0 == name }
         for idx in recordings.indices where recordings[idx].category == name {
             recordings[idx].category = nil
-            writeMetaIfChanged(for: recordings[idx])
+            Self.writeMetaIfChanged(for: recordings[idx])
         }
         save()
     }
@@ -564,14 +748,14 @@ final class RecordingStore {
                 let stem = sourceURL.deletingPathExtension().lastPathComponent
                 let workURL = SpoolLocation.url(fileName: "import-\(UUID().uuidString).m4a")
                 _ = try await AudioCompressor.compress(source: sourceURL, to: workURL, spec: .storage)
-                let destURL = uniqueURL(for: storageDirectory.appendingPathComponent("\(stem).m4a"))
+                let destURL = Self.uniqueURL(for: storageDirectory.appendingPathComponent("\(stem).m4a"))
                 try FileManager.default.moveItem(at: workURL, to: destURL)
                 recording = Recording(fileURL: destURL, date: .now,
                                       duration: Self.audioDuration(for: destURL))
             } else {
                 let workURL = SpoolLocation.url(fileName: "import-\(UUID().uuidString).\(sourceURL.pathExtension)")
                 try FileManager.default.copyItem(at: sourceURL, to: workURL)
-                let destURL = uniqueURL(for: storageDirectory.appendingPathComponent(sourceURL.lastPathComponent))
+                let destURL = Self.uniqueURL(for: storageDirectory.appendingPathComponent(sourceURL.lastPathComponent))
                 try FileManager.default.moveItem(at: workURL, to: destURL)
                 recording = Recording(fileURL: destURL, date: .now,
                                       duration: Self.audioDuration(for: destURL))
@@ -732,7 +916,7 @@ final class RecordingStore {
         let earliest = recordings.map(\.date).min() ?? .now
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
-        let destURL = uniqueURL(for: storageDirectory
+        let destURL = Self.uniqueURL(for: storageDirectory
             .appendingPathComponent("recording_\(formatter.string(from: earliest)).\(format.fileExtension)"))
         do {
             try FileManager.default.moveItem(at: workURL, to: destURL)
@@ -844,7 +1028,7 @@ final class RecordingStore {
         return (attrs?[.size] as? NSNumber)?.int64Value ?? 0
     }
 
-    private func uniqueURL(for url: URL) -> URL {
+    nonisolated private static func uniqueURL(for url: URL) -> URL {
         let fm = FileManager.default
         guard fm.fileExists(atPath: url.path) else { return url }
         let dir = url.deletingLastPathComponent()
@@ -858,6 +1042,12 @@ final class RecordingStore {
         }
     }
 
+    /// `audioDuration`, but never at the cost of pulling a cloud file down.
+    nonisolated static func audioDurationIfDownloaded(for url: URL) -> TimeInterval {
+        guard CloudPlaceholder.isDownloaded(url) else { return 0 }
+        return audioDuration(for: url)
+    }
+
     nonisolated static func audioDuration(for url: URL) -> TimeInterval {
         // AVAudioFile is fast (header read) and not deprecated, unlike asset.duration.
         if let file = try? AVAudioFile(forReading: url) {
@@ -868,14 +1058,14 @@ final class RecordingStore {
 
     // MARK: - Coding helpers
 
-    private static func encoder() -> JSONEncoder {
+    nonisolated private static func encoder() -> JSONEncoder {
         let e = JSONEncoder()
         e.dateEncodingStrategy = .iso8601
         e.outputFormatting = [.prettyPrinted, .sortedKeys]
         return e
     }
 
-    private static func decoder() -> JSONDecoder {
+    nonisolated private static func decoder() -> JSONDecoder {
         let d = JSONDecoder()
         d.dateDecodingStrategy = .iso8601
         return d

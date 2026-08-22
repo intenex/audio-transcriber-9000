@@ -229,7 +229,7 @@ final class MigrationAndWatcherTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(
             atPath: localDir.appendingPathComponent("legacy.m4a").path))
 
-        LibraryMigrator.disableSync(store: store, speakerLibrary: speakerLibrary, cloudSync: cloudSync)
+        await LibraryMigrator.disableSync(store: store, speakerLibrary: speakerLibrary, cloudSync: cloudSync)
         XCTAssertEqual(store.storageDirectory.standardizedFileURL, localDir.standardizedFileURL,
                        "disable returns to the previous local library")
     }
@@ -239,7 +239,7 @@ final class MigrationAndWatcherTests: XCTestCase {
         defaults.set(true, forKey: CloudSyncManager.enabledKey)
         defaults.set(containerDir.path, forKey: CloudSyncManager.containerPathKey)
         try? FileManager.default.createDirectory(at: containerDir, withIntermediateDirectories: true)
-        store.reloadFromStorageDirectory()
+        await store.reloadFromStorageDirectory()
         XCTAssertEqual(store.recordings.count, 0)
         cloudSync.startWatching()
 
@@ -264,7 +264,7 @@ final class MigrationAndWatcherTests: XCTestCase {
         defaults.set(true, forKey: CloudSyncManager.enabledKey)
         defaults.set(containerDir.path, forKey: CloudSyncManager.containerPathKey)
         try? FileManager.default.createDirectory(at: containerDir, withIntermediateDirectories: true)
-        store.reloadFromStorageDirectory()
+        await store.reloadFromStorageDirectory()
         cloudSync.startWatching()
 
         AtomicFile.resetSelfWriteLedger()

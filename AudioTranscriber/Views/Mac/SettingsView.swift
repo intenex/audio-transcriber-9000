@@ -392,10 +392,13 @@ struct StorageSettingsTab: View {
                 Label("Storage Location", systemImage: "folder.fill")
             }
             .onChange(of: storageDirectory) { _, _ in
-                store.reloadFromStorageDirectory()
-                // Keep the voice library pointed at the active storage folder,
-                // or enrollments would silently write to the old location.
-                speakerLibrary.attach(storageDirectory: store.storageDirectory)
+                Task {
+                    await store.reloadFromStorageDirectory()
+                    // Keep the voice library pointed at the active storage
+                    // folder, or enrollments would silently write to the old
+                    // location.
+                    speakerLibrary.attach(storageDirectory: store.storageDirectory)
+                }
             }
 
             CloudSyncSection()
