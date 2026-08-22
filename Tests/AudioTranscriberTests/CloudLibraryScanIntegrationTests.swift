@@ -63,4 +63,46 @@ final class CloudLibraryScanIntegrationTests: XCTestCase {
         XCTAssertEqual(downloadedAfter, downloadedBefore,
                        "walking the library must not pull audio down from iCloud")
     }
+
+    /// The other half of the contract: what the scan refuses to read, tapping
+    /// Play must be able to fetch. Uses the smallest not-yet-downloaded
+    /// recording and puts it back the way it was found.
+    func testTheSmallestPlaceholderDownloadsOnRequestAndPlaysBack() async throws {
+        try XCTSkipUnless(IntegrationGate.isEnabled, "marker file not present")
+
+        let engine = ICloudSyncEngine()
+        try XCTSkipUnless(engine.isAvailable, "not signed into iCloud")
+        let docs = await Task.detached { engine.resolveContainerDocumentsURL() }.value
+        let container = try XCTUnwrap(docs)
+
+        let entries = (try? FileManager.default.contentsOfDirectory(
+            at: container, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+        let candidates = entries
+            .filter { audioExtensions.contains($0.pathExtension.lowercased()) }
+            .filter { !CloudPlaceholder.isDownloaded($0) }
+            .sorted { RecordingStore.fileSize(of: $0) < RecordingStore.fileSize(of: $1) }
+        guard let target = candidates.first else {
+            throw XCTSkip("every recording is already downloaded on this device")
+        }
+        NSLog("[CloudScan] requesting \(target.lastPathComponent) "
+              + "(\(RecordingStore.fileSize(of: target)) bytes)")
+        XCTAssertTrue(CloudPlaceholder.isPlaceholderOnly(target))
+        XCTAssertEqual(RecordingStore.audioDurationIfDownloaded(for: target), 0,
+                       "the gate must report nothing for a file that isn't here")
+
+        CloudPlaceholder.requestDownload(target)
+        let deadline = Date().addingTimeInterval(120)
+        while !CloudPlaceholder.isDownloaded(target) && Date() < deadline {
+            try await Task.sleep(for: .milliseconds(500))
+        }
+        try XCTSkipUnless(CloudPlaceholder.isDownloaded(target),
+                          "iCloud did not deliver the file within 2 minutes — network, not logic")
+
+        XCTAssertFalse(CloudPlaceholder.isPlaceholderOnly(target))
+        XCTAssertGreaterThan(RecordingStore.audioDurationIfDownloaded(for: target), 0,
+                             "a downloaded recording reads its header — this is what Play needs")
+
+        // Leave the device as we found it (this is the "Remove Download" path).
+        try? FileManager.default.evictUbiquitousItem(at: target)
+    }
 }
