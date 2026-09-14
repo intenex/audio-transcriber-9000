@@ -9,9 +9,11 @@ User scope: capture microphone plus Mac output through headphone/speaker changes
 - [x] Stop-and-review screen with playback and explicit verified truncation.
 - [x] Long transcript rendering/search/highlighting and streamed playback performance.
 - [x] Update architecture/development/testing docs and run Mac build, full tests, appropriate gated tests, iOS build/tests, and actual app probes.
-- [ ] Review changes, commit, push, and verify GitHub state.
+- [x] Review changes, commit, push, and verify GitHub state.
 - [ ] Signed direct Mac release preserving all features (user decision); iOS TestFlight archive/upload, processing and internal/external group availability or specific review blockers.
 
 No hosted automation is being added. Builds and tests run locally. Real library audio remains read-only during verification.
 
 Verification checkpoint: 327 Mac tests (24 gated skips), 319 iOS tests (13 gated skips), and three iOS UI tests pass. Real local/preview/resume/long-file tests and scratch Mac recording, review, recovery, long-transcript scrolling and seven-hour seeking pass. ScreenCaptureKit virtual-route switching measures no gaps. AirPods physical switching is pending because the headphones disconnected.
+
+Release checkpoint: source revision `16f2e91` is pushed to `codex/recording-reliability`. Mac 1.1 (2) is Developer ID signed and Apple-notarized (submission `e34ae63f-82ee-4874-960a-71a7943b30ec`, Accepted), stapled and accepted by Gatekeeper. The exported app launched with a scratch library and played a saved recording with an advancing clock. The local ZIP and checksum are under ignored `dist/AudioTranscriber-1.1-2/`. iOS upload initially rejected the icon alpha channel; the iOS-only RGB copy preserves all color pixels and is being re-uploaded.
