@@ -14,11 +14,13 @@ settings:
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     DEVELOPMENT_TEAM: Z6FHNWFTWR
     CODE_SIGN_STYLE: Automatic
+    MARKETING_VERSION: "1.1"
+    CURRENT_PROJECT_VERSION: "2"
 
 packages:
   FluidAudio:
     url: https://github.com/FluidInference/FluidAudio.git
-    exactVersion: 0.12.4
+    exactVersion: 0.12.6
 
 targets:
   AudioTranscriber9000:
@@ -32,6 +34,8 @@ targets:
           - "App/iOS/**"
           - "Views/iOS/**"
           - "Info*.plist"
+      - path: scripts/generate.py
+        buildPhase: resources
     dependencies:
       - package: FluidAudio
     settings:
@@ -39,6 +43,7 @@ targets:
         PRODUCT_NAME: "Audio Transcriber 9000"
         PRODUCT_MODULE_NAME: AudioTranscriber
         PRODUCT_BUNDLE_IDENTIFIER: com.audiortranscriber.AudioTranscriber
+        ARCHS: arm64
         INFOPLIST_FILE: AudioTranscriber/Info.plist
         CODE_SIGN_ENTITLEMENTS: AudioTranscriber/AudioTranscriber.entitlements
         ENABLE_HARDENED_RUNTIME: YES
@@ -47,6 +52,9 @@ targets:
     info:
       path: AudioTranscriber/Info.plist
       properties:
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        ITSAppUsesNonExemptEncryption: false
         NSMicrophoneUsageDescription: "Audio Transcriber 9000 needs microphone access to record audio for transcription."
         NSAudioCaptureUsageDescription: "Audio Transcriber 9000 can record what the Mac plays (the other side of calls, videos) alongside the microphone so nothing is missing from a transcript."
         NSPrincipalClass: NSApplication
@@ -76,10 +84,14 @@ targets:
         INFOPLIST_FILE: AudioTranscriber/Info-iOS.plist
         CODE_SIGN_ENTITLEMENTS: AudioTranscriber/AudioTranscriber-iOS.entitlements
         TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_EMIT_LOC_STRINGS: YES
     info:
       path: AudioTranscriber/Info-iOS.plist
       properties:
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        ITSAppUsesNonExemptEncryption: false
         NSMicrophoneUsageDescription: "Audio Transcriber 9000 needs microphone access to record audio for transcription."
         CFBundleDisplayName: "AT-9000"
         UILaunchScreen: {}

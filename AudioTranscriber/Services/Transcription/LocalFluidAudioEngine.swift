@@ -77,8 +77,8 @@ actor LocalFluidAudioEngine: TranscriptionEngine {
     }
 
     /// Release loaded models (frees ~1 GB of memory).
-    func unloadModels() {
-        asrManager?.cleanup()
+    func unloadModels() async {
+        await asrManager?.cleanup()
         asrManager = nil
         diarizer?.cleanup()
         diarizer = nil

@@ -6,8 +6,14 @@ import Foundation
 /// agent would upload a half-written, unfinalized container. Files land in
 /// the library only via a rename after they are complete and verified.
 enum SpoolLocation {
+    private static var root: URL {
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil || ProcessInfo.processInfo.arguments.contains("-uiTestSeedLibrary") {
+            return FileManager.default.temporaryDirectory.appendingPathComponent("AudioTranscriber-TestSpool-\(ProcessInfo.processInfo.processIdentifier)")
+        }
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    }
     static var directory: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        root
             .appendingPathComponent("AudioTranscriber/InProgress", isDirectory: true)
     }
 
@@ -23,7 +29,7 @@ enum SpoolLocation {
     /// (that is exactly how a 619 MB phantom entry appeared once). They are
     /// kept, never deleted: a repair tool can still get at the bytes.
     static var unfinishedDirectory: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        root
             .appendingPathComponent("AudioTranscriber/Unfinished", isDirectory: true)
     }
 }

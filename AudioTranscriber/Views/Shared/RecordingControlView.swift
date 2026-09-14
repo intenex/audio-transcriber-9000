@@ -13,16 +13,13 @@ struct RecordingControlView: View {
             Spacer()
 
             VStack(spacing: 32) {
-                // Hero icon with animated ring
+                // A static recording indicator avoids continuous redraws during long sessions.
                 ZStack {
-                    // Outer pulsing ring when recording
+                    // The timer supplies the brief once-per-second motion.
                     if audioRecorder.isRecording {
                         Circle()
                             .stroke(AppTheme.recording.opacity(0.3), lineWidth: 3)
                             .frame(width: 140, height: 140)
-                            .scaleEffect(audioRecorder.isRecording ? 1.2 : 1.0)
-                            .opacity(audioRecorder.isRecording ? 0 : 1)
-                            .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: false), value: audioRecorder.isRecording)
                     }
 
                     // Background circle
@@ -35,7 +32,6 @@ struct RecordingControlView: View {
                     Image(systemName: audioRecorder.isRecording ? "waveform" : "mic.fill")
                         .font(.system(size: 40, weight: .medium))
                         .foregroundStyle(.white)
-                        .symbolEffect(.variableColor.iterative, isActive: audioRecorder.isRecording)
                 }
 
                 // Timer
@@ -44,10 +40,10 @@ struct RecordingControlView: View {
                     .foregroundStyle(audioRecorder.isRecording ? .primary : .tertiary)
                     .monospacedDigit()
                     .contentTransition(.numericText())
-                    .animation(.default, value: timerString)
+                    .animation(.easeOut(duration: 0.18), value: timerString)
 
                 // Silence guardrail: visible well before it acts, so an
-                // auto-stop is never a surprise.
+                // automatic pause is never a surprise.
                 if audioRecorder.isRecording, let silence = silenceWarning {
                     Label(silence, systemImage: "speaker.slash")
                         .font(.caption)
@@ -59,7 +55,7 @@ struct RecordingControlView: View {
                     HStack(spacing: 8) {
                         Image(systemName: audioRecorder.isRecording ? "stop.fill" : "record.circle")
                             .font(.body.weight(.semibold))
-                        Text(audioRecorder.isRecording ? "Stop Recording" : "Start Recording")
+                        Text(audioRecorder.isStartingRecording ? "Connecting audio…" : (audioRecorder.isRecording ? "Stop Recording" : "Start Recording"))
                             .font(.body.weight(.semibold))
                     }
                     .frame(width: 200, height: 44)
@@ -70,6 +66,19 @@ struct RecordingControlView: View {
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut(.space, modifiers: [])
+                .disabled(audioRecorder.isStartingRecording || audioRecorder.isFinalizingRecording)
+
+                if audioRecorder.isRecording {
+                    Button(audioRecorder.isPaused ? "Resume Recording" : "Pause Recording") {
+                        if audioRecorder.isPaused { audioRecorder.resumeRecording() }
+                        else { audioRecorder.pauseRecording() }
+                    }
+                    .disabled(audioRecorder.isStartingRecording)
+                    if audioRecorder.isPaused {
+                        Text("Paused — your audio is preserved").foregroundStyle(.orange)
+                    }
+                }
+                if audioRecorder.isFinalizingRecording { ProgressView("Saving recording…") }
 
                 // Subtitle
                 if !audioRecorder.isRecording {
@@ -140,13 +149,13 @@ struct RecordingControlView: View {
                         .font(.caption)
                         .foregroundStyle(AppTheme.warning)
                 }
-                if SystemAudioCapture.isSupported {
+                Group {
                     Toggle(isOn: $recordSystemAudio) {
                         Text("Also record system audio (calls, videos)")
                             .font(.subheadline)
                     }
                     .toggleStyle(.checkbox)
-                    .help("Captures what the Mac plays — the other side of a call in your AirPods, a video's soundtrack — mixed with the microphone. macOS asks for System Audio Recording permission once.")
+                    .help("Captures what the Mac plays — the other side of a call in your AirPods, a video's soundtrack — mixed with the microphone. Enable Screen & System Audio Recording permission when macOS asks. Only audio is saved.")
                 }
             }
         }
@@ -197,20 +206,14 @@ struct RecordingControlView: View {
         }
     }
 
-    private var timerString: String {
-        let duration = audioRecorder.recordingDuration
-        let m = (Int(duration) % 3600) / 60
-        let s = Int(duration) % 60
-        let ms = Int((duration.truncatingRemainder(dividingBy: 1)) * 10)
-        return String(format: "%02d:%02d.%d", m, s, ms)
-    }
+    private var timerString: String { RecordingClock.display(audioRecorder.recordingDuration) }
 
     /// Warning text once the mic has been quiet for a few minutes; nil while
     /// sound is arriving normally.
     private var silenceWarning: String? {
         let silence = audioRecorder.silenceDuration
         guard silence >= 180 else { return nil }
-        return "No sound for \(Int(silence / 60)) min — recording stops automatically at \(Int(SilenceDetector.Config.fromDefaults().silenceLimit / 60)) min of silence"
+        return "No sound for \(Int(silence / 60)) min — recording pauses automatically at \(Int(SilenceDetector.Config.fromDefaults().silenceLimit / 60)) min of silence"
     }
 
     private func toggleRecording() {

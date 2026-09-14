@@ -9,12 +9,20 @@ import XCTest
 @MainActor
 final class RecorderSpoolIntegrationTests: XCTestCase {
 
+    private func savedRecording(_ recorder: AudioRecorder, store: RecordingStore) async throws -> Recording {
+        for _ in 0..<120 where recorder.isFinalizingRecording || store.recordings.isEmpty {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        return try XCTUnwrap(store.recordings.first, recorder.errorMessage ?? "No recording saved")
+    }
+
     /// Also satisfiable inside the iOS app container so these run on a real
     /// phone (see IntegrationGate).
     private var enabled: Bool { IntegrationGate.isEnabled }
 
     func testRecordingSpoolsThenLandsInLibrary() async throws {
         try XCTSkipUnless(enabled, "marker file not present")
+        let restore = forceMicOnlyCapture(); defer { restore() }
 
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("RecSpool-\(UUID().uuidString)", isDirectory: true)
@@ -40,7 +48,8 @@ final class RecorderSpoolIntegrationTests: XCTestCase {
         XCTAssertFalse(active.path.hasPrefix(tempDir.path))
 
         try await Task.sleep(for: .seconds(3))
-        let recording = try XCTUnwrap(recorder.stopRecording())
+        recorder.stopRecording()
+        let recording = try await savedRecording(recorder, store: store)
 
         XCTAssertTrue(recording.fileURL.path.hasPrefix(tempDir.path),
                       "finalized file was renamed into the library")
@@ -126,7 +135,7 @@ final class RecorderSpoolIntegrationTests: XCTestCase {
     /// that treat every possible input as silence, a live recording must stop
     /// itself after the limit AND land in the library — stop-and-SAVE, never
     /// stop-and-discard.
-    func testSilenceGuardrailStopsAndSavesTheRecording() async throws {
+    func testSilenceGuardrailWarnsPausesAndResumesTheRecording() async throws {
         try XCTSkipUnless(enabled, "marker file not present")
 
         let tempDir = FileManager.default.temporaryDirectory
@@ -144,7 +153,8 @@ final class RecorderSpoolIntegrationTests: XCTestCase {
         // Nothing can clear these bars, so whatever the room sounds like the
         // recorder sees uninterrupted silence — the wiring is what's under test.
         var config = SilenceDetector.Config.default
-        config.silenceLimit = 4
+        config.silenceLimit = 6
+        recorder.silenceWarningIntervalOverride = 2
         config.alwaysSoundRMSDB = 0
         config.alwaysSoundPeakDB = 0
         config.audibleFloorDB = 0
@@ -156,16 +166,22 @@ final class RecorderSpoolIntegrationTests: XCTestCase {
         }
         XCTAssertTrue(recorder.isRecording, "recording never started — mic permission?")
 
-        for _ in 0..<40 where recorder.isRecording {
-            try await Task.sleep(for: .milliseconds(500))
-        }
-        XCTAssertFalse(recorder.isRecording, "silence guardrail never fired")
-        XCTAssertNotNil(recorder.errorMessage, "the auto-stop must explain itself")
-
-        for _ in 0..<40 where store.recordings.isEmpty {
-            try await Task.sleep(for: .milliseconds(250))
-        }
-        let recording = try XCTUnwrap(store.recordings.first, "auto-stopped audio must still be saved")
+        for _ in 0..<20 where recorder.pendingCheckIn == nil { try await Task.sleep(for: .milliseconds(250)) }
+        XCTAssertEqual(recorder.pendingCheckIn?.reason, .silence)
+        XCTAssertFalse(recorder.isPaused, "warning must keep recording")
+        for _ in 0..<40 where !recorder.isPaused { try await Task.sleep(for: .milliseconds(250)) }
+        XCTAssertTrue(recorder.isPaused, "silence guardrail never fired")
+        XCTAssertTrue(recorder.isRecording, "paused session must remain resumable")
+        let pausedTime = recorder.recordingDuration
+        try await Task.sleep(for: .seconds(1))
+        XCTAssertEqual(recorder.recordingDuration, pausedTime)
+        recorder.resumeRecording()
+        for _ in 0..<40 where recorder.isStartingRecording { try await Task.sleep(for: .milliseconds(250)) }
+        try await Task.sleep(for: .seconds(1))
+        XCTAssertFalse(recorder.isPaused)
+        XCTAssertGreaterThanOrEqual(recorder.recordingDuration, pausedTime)
+        recorder.stopRecording()
+        let recording = try await savedRecording(recorder, store: store)
         XCTAssertTrue(FileManager.default.fileExists(atPath: recording.fileURL.path))
         XCTAssertGreaterThan(RecordingStore.audioDuration(for: recording.fileURL), 2,
                              "the captured audio survives the auto-stop")
@@ -190,6 +206,15 @@ final class RecorderSpoolIntegrationTests: XCTestCase {
         store.load()
         let recorder = AudioRecorder()
         recorder.attach(store: store)
+        #if os(macOS)
+        let inputs = AudioInputDeviceStore(defaults: UserDefaults(suiteName: "SignalInputs-\(UUID())")!)
+        inputs.selectedUID = inputs.devices.first { $0.name.contains("MacBook") }?.uid
+        recorder.inputDeviceStore = inputs
+        #endif
+        let previousSystemAudio = recorder.recordSystemAudioPreference
+        recorder.recordSystemAudioPreference = false
+        defer { recorder.recordSystemAudioPreference = previousSystemAudio }
+
 
         recorder.startRecording()
         for _ in 0..<40 where !recorder.isRecording {
@@ -197,7 +222,8 @@ final class RecorderSpoolIntegrationTests: XCTestCase {
         }
         XCTAssertTrue(recorder.isRecording, "recording never started — mic permission?")
         try await Task.sleep(for: .seconds(3))
-        let recording = try XCTUnwrap(recorder.stopRecording())
+        recorder.stopRecording()
+        let recording = try await savedRecording(recorder, store: store)
 
         let file = try AVAudioFile(forReading: recording.fileURL)
         let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 8_192)!
@@ -317,7 +343,12 @@ final class RecorderSpoolIntegrationTests: XCTestCase {
         XCTAssertNotNil(recorder.pendingCheckIn, "the next check-in must arrive")
         XCTAssertTrue(recorder.isRecording, "unanswered check-ins never stop a recording")
 
+        let beforeAcknowledgement = recorder.recordingDuration
+        recorder.acknowledgeCheckIn()
+        XCTAssertGreaterThanOrEqual(recorder.recordingDuration, beforeAcknowledgement)
         recorder.stopRecordingFromCheckIn()
+        _ = try await savedRecording(recorder, store: store)
+        XCTAssertNotNil(recorder.recordingToReview)
         XCTAssertFalse(recorder.isRecording)
         XCTAssertNil(recorder.pendingCheckIn)
     }

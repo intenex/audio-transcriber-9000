@@ -125,6 +125,7 @@ final class AudioInputDeviceStore {
         return ids.compactMap { deviceID in
             guard inputChannelCount(deviceID) > 0,
                   let uid = stringProperty(deviceID, selector: kAudioDevicePropertyDeviceUID),
+                  !uid.hasPrefix("com.audiortranscriber.tap."),
                   let name = stringProperty(deviceID, selector: kAudioObjectPropertyName) else {
                 return nil
             }

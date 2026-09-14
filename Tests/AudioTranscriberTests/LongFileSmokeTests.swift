@@ -12,17 +12,16 @@ final class LongFileSmokeTests: XCTestCase {
         FileManager.default.fileExists(atPath: "/tmp/audiotranscriber-integration-tests")
     }
 
-    private var longSampleURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Documents/AudioTranscriber/recording_2026-03-30_17-38-10.wav")
+    private func sample(_ stem: String) -> URL {
+        let base = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents/AudioTranscriber/" + stem)
+        let wav = base.appendingPathExtension("wav")
+        return FileManager.default.fileExists(atPath: wav.path) ? wav : base.appendingPathExtension("m4a")
     }
+    private var longSampleURL: URL { sample("recording_2026-03-30_17-38-10") }
 
     /// 4h56m / 3.4GB — PCM payload >2GB, which crashed the old single-shot
     /// loader with com.apple.coreaudio.avfaudio error -40.
-    private var hugeSampleURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Documents/AudioTranscriber/recording_2026-03-26_10-31-39.wav")
-    }
+    private var hugeSampleURL: URL { sample("recording_2026-03-26_10-31-39") }
 
     func testFiveHourRecordingLoadsAndTranscribes() async throws {
         try XCTSkipUnless(enabled, "marker file not present")

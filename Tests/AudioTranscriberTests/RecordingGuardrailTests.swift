@@ -9,6 +9,10 @@ import XCTest
 /// recording that is capturing audio is never stopped. Every "there was sound"
 /// case is asserted over hours of simulated time.
 final class RecordingGuardrailTests: XCTestCase {
+    func testCheckInNotificationCannotResetItsOwnSilenceClock() {
+        XCTAssertNil(RecordingNotifier.checkInContent(elapsed: 900, silence: 900).sound)
+        XCTAssertNil(RecordingNotifier.checkInContent(elapsed: 7200).sound)
+    }
 
     // MARK: - Level measurement
 
@@ -62,7 +66,7 @@ final class RecordingGuardrailTests: XCTestCase {
     // MARK: - Silence detection: it must stop when nothing is captured
 
     func testContinuousDigitalSilenceStopsExactlyAtTheLimit() {
-        var detector = SilenceDetector()
+        var detector = SilenceDetector(config: .init(silenceLimit: 20 * 60))
         for step in 1..<12_000 {   // 0.1 s steps, up to 19:59.9
             let time = Double(step) * 0.1
             detector.observe(rmsDB: AudioLevel.minimumDB, peakDB: AudioLevel.minimumDB, at: time)
@@ -75,7 +79,7 @@ final class RecordingGuardrailTests: XCTestCase {
     /// A muted or unplugged mic that still delivers buffers: dead-quiet room
     /// tone well under the audible floor.
     func testDeadQuietRoomStopsAfterTheLimit() {
-        var detector = SilenceDetector()
+        var detector = SilenceDetector(config: .init(silenceLimit: 20 * 60))
         for step in stride(from: 0.1, through: 25 * 60, by: 0.5) {
             detector.observe(rmsDB: -84, peakDB: -78, at: step)
         }
@@ -104,14 +108,20 @@ final class RecordingGuardrailTests: XCTestCase {
         XCTAssertFalse(detector.shouldAutoStop(at: 10 * 3_600))
     }
 
+    func testDefaultPauseLimitIsThirtyMinutes() {
+        let detector = SilenceDetector()
+        XCTAssertFalse(detector.shouldAutoStop(at: 1799.9))
+        XCTAssertTrue(detector.shouldAutoStop(at: 1800))
+    }
+
     func testConfigFromDefaultsReadsMinutes() {
         let defaults = UserDefaults(suiteName: "guardrails-\(UUID().uuidString)")!
-        XCTAssertEqual(SilenceDetector.Config.fromDefaults(defaults).silenceLimit, 20 * 60)
-        defaults.set(45.0, forKey: "silenceAutoStopMinutes")
+        XCTAssertEqual(SilenceDetector.Config.fromDefaults(defaults).silenceLimit, 30 * 60)
+        defaults.set(45.0, forKey: "silenceAutoPauseMinutes")
         XCTAssertEqual(SilenceDetector.Config.fromDefaults(defaults).silenceLimit, 45 * 60)
-        defaults.set(0.0, forKey: "silenceAutoStopMinutes")
+        defaults.set(0.0, forKey: "silenceAutoPauseMinutes")
         XCTAssertEqual(SilenceDetector.Config.fromDefaults(defaults).silenceLimit, 0)
-        defaults.set(-5.0, forKey: "silenceAutoStopMinutes")
+        defaults.set(-5.0, forKey: "silenceAutoPauseMinutes")
         XCTAssertEqual(SilenceDetector.Config.fromDefaults(defaults).silenceLimit, 0)
     }
 
@@ -119,7 +129,7 @@ final class RecordingGuardrailTests: XCTestCase {
 
     /// A three-hour conversation: bursts of speech separated by pauses.
     func testConversationWithPausesNeverStops() {
-        var detector = SilenceDetector()
+        var detector = SilenceDetector(config: .init(silenceLimit: 20 * 60))
         var time: TimeInterval = 0
         var speaking = true
         while time < 3 * 3_600 {
@@ -142,7 +152,7 @@ final class RecordingGuardrailTests: XCTestCase {
     /// Distant, quiet speech (a lecture across a room) — under every absolute
     /// threshold, caught only by the noise-floor-relative rule.
     func testQuietDistantSpeechNeverStops() {
-        var detector = SilenceDetector()
+        var detector = SilenceDetector(config: .init(silenceLimit: 20 * 60))
         var time: TimeInterval = 0
         while time < 3 * 3_600 {
             // 4 s of faint speech, 12 s of even fainter room tone.
@@ -160,7 +170,7 @@ final class RecordingGuardrailTests: XCTestCase {
 
     /// Steady loud content (music, a call on speaker) with no gaps at all.
     func testSteadyLoudContentNeverStops() {
-        var detector = SilenceDetector()
+        var detector = SilenceDetector(config: .init(silenceLimit: 20 * 60))
         for step in stride(from: 0.1, through: 6 * 3_600, by: 0.5) {
             detector.observe(rmsDB: -30, peakDB: -18, at: step)
             XCTAssertFalse(detector.shouldAutoStop(at: step))
@@ -170,7 +180,7 @@ final class RecordingGuardrailTests: XCTestCase {
     /// Content sitting exactly on the absolute always-sound line stays sound
     /// forever, however far the noise floor drifts.
     func testContentAtTheAbsoluteThresholdNeverStops() {
-        var detector = SilenceDetector()
+        var detector = SilenceDetector(config: .init(silenceLimit: 20 * 60))
         for step in stride(from: 0.1, through: 4 * 3_600, by: 0.5) {
             detector.observe(rmsDB: -45, peakDB: -44, at: step)
             XCTAssertFalse(detector.shouldAutoStop(at: step))
@@ -180,7 +190,7 @@ final class RecordingGuardrailTests: XCTestCase {
     /// Sparse transients (typing, a door, a cough) that an RMS window averages
     /// away still prove the mic is live.
     func testSparseTransientsKeepTheRecordingAlive() {
-        var detector = SilenceDetector()
+        var detector = SilenceDetector(config: .init(silenceLimit: 20 * 60))
         var time: TimeInterval = 0
         while time < 4 * 3_600 {
             // One transient every 15 minutes, silence in between.
@@ -196,7 +206,7 @@ final class RecordingGuardrailTests: XCTestCase {
 
     /// One sounding buffer just before the deadline resets the whole clock.
     func testSingleSoundingBufferResetsTheClock() {
-        var detector = SilenceDetector()
+        var detector = SilenceDetector(config: .init(silenceLimit: 20 * 60))
         for step in stride(from: 0.1, through: 19 * 60 + 59, by: 0.5) {
             detector.observe(rmsDB: -95, peakDB: -90, at: step)
         }
@@ -214,7 +224,7 @@ final class RecordingGuardrailTests: XCTestCase {
     /// Rebuilding capture (AirPods swap) restarts the clock — the gap was never
     /// measured, so it must not count against the recording.
     func testCaptureRestartResetsTheClock() {
-        var detector = SilenceDetector()
+        var detector = SilenceDetector(config: .init(silenceLimit: 20 * 60))
         for step in stride(from: 0.1, through: 19 * 60, by: 1) {
             detector.observe(rmsDB: -95, peakDB: -90, at: step)
         }
@@ -231,7 +241,7 @@ final class RecordingGuardrailTests: XCTestCase {
     /// input) must NOT reset the clock — otherwise recovery attempts would
     /// defer the limit forever.
     func testSilenceTriggeredRestartKeepsTheClockRunning() {
-        var detector = SilenceDetector()
+        var detector = SilenceDetector(config: .init(silenceLimit: 20 * 60))
         for step in stride(from: 0.1, through: 1_140.0, by: 1.0) {
             detector.observe(rmsDB: -95, peakDB: -90, at: step)
         }
@@ -248,7 +258,7 @@ final class RecordingGuardrailTests: XCTestCase {
     /// …but if reopening the input actually fixed it, the first real sound
     /// clears everything.
     func testSoundAfterSilenceRecoveryResetsTheClock() {
-        var detector = SilenceDetector()
+        var detector = SilenceDetector(config: .init(silenceLimit: 20 * 60))
         for step in stride(from: 0.1, through: 1_140.0, by: 1.0) {
             detector.observe(rmsDB: -95, peakDB: -90, at: step)
         }
@@ -262,7 +272,7 @@ final class RecordingGuardrailTests: XCTestCase {
     /// treated as sound for many minutes even if it never varies — and the
     /// 20-minute clock only starts after that.
     func testNoiseFloorRisesSlowlyEnoughToProtectFaintContent() {
-        var detector = SilenceDetector()
+        var detector = SilenceDetector(config: .init(silenceLimit: 20 * 60))
         // Ten minutes of a dead-quiet room establishes a very low floor.
         for step in stride(from: 0.1, through: 10 * 60, by: 0.5) {
             detector.observe(rmsDB: -85, peakDB: -80, at: step)
@@ -282,7 +292,7 @@ final class RecordingGuardrailTests: XCTestCase {
     /// Sound at the very start, then genuine silence: the limit runs from the
     /// last sound, not from the start of the recording.
     func testSilenceClockRunsFromLastSound() {
-        var detector = SilenceDetector()
+        var detector = SilenceDetector(config: .init(silenceLimit: 20 * 60))
         for step in stride(from: 0.1, through: 60, by: 0.1) {
             detector.observe(rmsDB: -24, peakDB: -12, at: step)
         }

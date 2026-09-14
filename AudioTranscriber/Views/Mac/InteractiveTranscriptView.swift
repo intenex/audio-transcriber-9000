@@ -24,6 +24,7 @@ struct InteractiveTranscriptView: NSViewRepresentable {
         scrollView.drawsBackground = false
 
         let textView = ClickableTextView(frame: .zero)
+        textView.layoutManager?.allowsNonContiguousLayout = true
         textView.isEditable = false
         textView.isSelectable = true
         textView.drawsBackground = false
@@ -73,8 +74,11 @@ struct InteractiveTranscriptView: NSViewRepresentable {
 
     class Coordinator: NSObject {
         var wordRanges: [TranscriptWordRange] = []
+        var playbackIndex = TranscriptPlaybackIndex([])
         var highlightedRange: NSRange? = nil
         var searchHighlightedRanges: [NSRange] = []
+        var buildGeneration = UUID()
+        var requestedSearchQuery = ""
         var lastSegmentCount: Int = -1
         var lastContentID: String = ""
         var lastSpeakerNames: [String: String] = [:]
@@ -98,16 +102,29 @@ struct InteractiveTranscriptView: NSViewRepresentable {
             searchHighlightedRanges = []
             lastSearchQuery = ""
 
-            let output = TranscriptTextBuilder.build(segments: segments, speakerNames: speakerNames)
-            wordRanges = output.wordRanges
-
-            textView.textStorage?.setAttributedString(output.text)
-            textView.wordRanges = output.wordRanges
+            let generation = UUID()
+            buildGeneration = generation
             lastSegmentCount = segments.count
             lastSpeakerNames = speakerNames
+            wordRanges = []; playbackIndex = TranscriptPlaybackIndex([])
+            textView.wordRanges = []
+            textView.string = "Loading transcript…"
+            Task { @MainActor [weak self, weak textView] in
+                let output = await Task.detached(priority: .userInitiated) {
+                    TranscriptTextBuilder.build(segments: segments, speakerNames: speakerNames)
+                }.value
+                guard let self, let textView, self.buildGeneration == generation else { return }
+                self.wordRanges = output.wordRanges
+                self.playbackIndex = TranscriptPlaybackIndex(output.wordRanges)
+                textView.wordRanges = output.wordRanges
+                textView.textStorage?.setAttributedString(output.text)
+                self.lastSearchQuery = ""
+                self.updateSearchHighlighting(query: self.requestedSearchQuery)
+            }
         }
 
         func updateSearchHighlighting(query: String) {
+            requestedSearchQuery = query
             guard let textView = textView, let storage = textView.textStorage else { return }
             guard query != lastSearchQuery else { return }
             lastSearchQuery = query
@@ -131,18 +148,18 @@ struct InteractiveTranscriptView: NSViewRepresentable {
         func updateHighlighting(for time: Double) {
             guard let textView = textView, let storage = textView.textStorage else { return }
 
-            let newRange = TranscriptTextBuilder.wordRange(at: time, in: wordRanges)
+            let newRange = playbackIndex.word(at: time)
             guard newRange != highlightedRange else { return }
 
             if let old = highlightedRange, old.location + old.length <= storage.length {
-                storage.removeAttribute(.backgroundColor, range: old)
+                textView.layoutManager?.removeTemporaryAttribute(.backgroundColor, forCharacterRange: old)
             }
 
             highlightedRange = newRange
             if let new = newRange, new.location + new.length <= storage.length {
-                storage.addAttribute(.backgroundColor,
+                textView.layoutManager?.addTemporaryAttribute(.backgroundColor,
                                      value: NSColor.systemYellow.withAlphaComponent(0.5),
-                                     range: new)
+                                     forCharacterRange: new)
                 textView.scrollRangeToVisible(new)
             }
         }
@@ -150,7 +167,7 @@ struct InteractiveTranscriptView: NSViewRepresentable {
         func clearHighlighting() {
             guard let textView = textView, let storage = textView.textStorage else { return }
             if let old = highlightedRange, old.location + old.length <= storage.length {
-                storage.removeAttribute(.backgroundColor, range: old)
+                textView.layoutManager?.removeTemporaryAttribute(.backgroundColor, forCharacterRange: old)
             }
             highlightedRange = nil
         }

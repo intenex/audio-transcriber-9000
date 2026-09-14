@@ -48,7 +48,7 @@ struct RecordingCheckInAlert: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .alert("Still recording?",
+            .alert(audioRecorder.pendingCheckIn?.reason == .silence ? "No sound captured" : "Still recording?",
                    isPresented: .constant(enabled && audioRecorder.pendingCheckIn != nil)) {
                 // "Keep Recording" carries the cancel role on purpose: without
                 // one, SwiftUI synthesizes its own Cancel button that would
@@ -56,9 +56,17 @@ struct RecordingCheckInAlert: ViewModifier {
                 // binding, leave it stuck re-presenting). Escaping the alert
                 // must mean "keep going" — never end a live recording.
                 Button("Keep Recording", role: .cancel) { audioRecorder.acknowledgeCheckIn() }
-                Button("Stop & Save", role: .destructive) { audioRecorder.stopRecordingFromCheckIn() }
+                Button("Yes, Stop & Review Trim", role: .destructive) { audioRecorder.stopRecordingFromCheckIn() }
             } message: {
-                Text("This recording has been running for \(RecordingNotifier.durationText(audioRecorder.pendingCheckIn?.elapsed ?? 0)).")
+                if audioRecorder.pendingCheckIn?.reason == .silence {
+                    Text("No sound has been captured for 15 minutes. Recording continues and will pause at 30 minutes of silence unless you choose Keep Recording.")
+                } else {
+                    Text("Recording continues while this message is open. Choose Keep Recording to continue, or stop and listen back to choose where to trim.")
+                }
+            }
+            .sheet(item: Binding(get: { enabled ? audioRecorder.recordingToReview : nil },
+                                 set: { if $0 == nil { audioRecorder.finishReview() } })) { recording in
+                RecordingTrimReview(recording: recording)
             }
     }
 }

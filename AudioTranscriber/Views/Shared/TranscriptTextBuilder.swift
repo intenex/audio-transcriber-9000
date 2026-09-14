@@ -105,24 +105,22 @@ enum TranscriptTextBuilder {
                 .paragraphStyle: headerPara
             ]))
 
-            for word in group.words {
+            // Build one attributed run per speaker; bound paragraph length so
+            // scrolling never asks TextKit to lay out hours in one paragraph.
+            var body = ""
+            var offset = result.length
+            for (index, word) in group.words.enumerated() {
                 guard !word.text.isEmpty else { continue }
-                let rangeStart = result.length
-                result.append(NSAttributedString(string: word.text, attributes: [
-                    .font: bodyFont,
-                    .foregroundColor: bodyColor,
-                    .paragraphStyle: bodyParagraph
-                ]))
-                wordRanges.append(TranscriptWordRange(
-                    range: NSRange(location: rangeStart, length: (word.text as NSString).length),
-                    start: word.start,
-                    end: word.end
-                ))
-                result.append(NSAttributedString(string: " ", attributes: [
-                    .font: bodyFont,
-                    .paragraphStyle: bodyParagraph
-                ]))
+                let length = (word.text as NSString).length
+                wordRanges.append(TranscriptWordRange(range: NSRange(location: offset, length: length),
+                                                      start: word.start, end: word.end))
+                let separator = (index + 1) % 80 == 0 ? "\n" : " "
+                body += word.text + separator
+                offset += length + 1
             }
+            result.append(NSAttributedString(string: body, attributes: [
+                .font: bodyFont, .foregroundColor: bodyColor, .paragraphStyle: bodyParagraph
+            ]))
 
             result.append(NSAttributedString(string: "\n\n"))
         }
@@ -134,12 +132,14 @@ enum TranscriptTextBuilder {
     static func searchRanges(in fullText: String, query: String) -> [NSRange] {
         guard !query.isEmpty else { return [] }
         var ranges: [NSRange] = []
-        let lowered = fullText.lowercased()
-        let loweredQuery = query.lowercased()
-        var searchStart = lowered.startIndex
-        while let range = lowered.range(of: loweredQuery, range: searchStart..<lowered.endIndex) {
-            ranges.append(NSRange(range, in: fullText))
-            searchStart = range.upperBound
+        let text = fullText as NSString
+        var offset = 0
+        while offset < text.length {
+            let match = text.range(of: query, options: .caseInsensitive,
+                                   range: NSRange(location: offset, length: text.length - offset))
+            guard match.location != NSNotFound, match.length > 0 else { break }
+            ranges.append(match)
+            offset = NSMaxRange(match)
         }
         return ranges
     }
@@ -154,9 +154,12 @@ enum TranscriptTextBuilder {
 
     /// The word (if any) containing a tapped/clicked character index.
     static func seekTime(forCharacterAt index: Int, in ranges: [TranscriptWordRange]) -> TimeInterval? {
-        for entry in ranges where NSLocationInRange(index, entry.range) {
-            return entry.start
+        var low = 0, high = ranges.count
+        while low < high {
+            let mid = (low + high) / 2
+            if NSMaxRange(ranges[mid].range) <= index { low = mid + 1 } else { high = mid }
         }
+        if low < ranges.count, NSLocationInRange(index, ranges[low].range) { return ranges[low].start }
         return nil
     }
 
@@ -165,5 +168,31 @@ enum TranscriptTextBuilder {
         let m = (Int(seconds) % 3600) / 60
         let s = Int(seconds) % 60
         return String(format: "%d:%02d:%02d", h, m, s)
+    }
+}
+
+/// Prefix end times permit a logarithmic lookup even with overlapping words.
+/// Transcript order is retained, including the original first-overlap behavior.
+struct TranscriptPlaybackIndex {
+    let ranges: [TranscriptWordRange]
+    private let maximumEnds: [Double]
+    init(_ ranges: [TranscriptWordRange]) {
+        self.ranges = ranges
+        var maximum = -Double.infinity
+        maximumEnds = ranges.map { maximum = max(maximum, $0.end); return maximum }
+    }
+    func word(at time: Double) -> NSRange? {
+        var low = 0, high = maximumEnds.count
+        while low < high {
+            let middle = (low + high) / 2
+            if maximumEnds[middle] <= time { low = middle + 1 } else { high = middle }
+        }
+        while low < ranges.count {
+            let entry = ranges[low]
+            if entry.start <= time && time < entry.end { return entry.range }
+            if entry.start > time { return nil }
+            low += 1
+        }
+        return nil
     }
 }

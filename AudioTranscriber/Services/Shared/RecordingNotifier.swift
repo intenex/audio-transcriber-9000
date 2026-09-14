@@ -7,11 +7,11 @@ import UIKit
 #endif
 
 /// Notifications about a recording that is still running: the long-recording
-/// check-in ("still recording?") and the silence auto-stop notice.
+/// check-in ("still recording?") and the silence pause notice.
 ///
 /// These exist for the case where the app is NOT in front — the situation that
 /// let a recording run unattended for 70 hours. The check-in banner carries
-/// Keep Recording / Stop & Save actions so the answer never requires finding
+/// Keep Recording / Stop & Review actions so the answer never requires finding
 /// the window.
 final class RecordingNotifier: NSObject {
     static let shared = RecordingNotifier()
@@ -41,7 +41,7 @@ final class RecordingNotifier: NSObject {
         let keep = UNNotificationAction(identifier: Self.keepActionID,
                                         title: "Keep Recording", options: [])
         let stop = UNNotificationAction(identifier: Self.stopActionID,
-                                        title: "Stop & Save", options: [.destructive])
+                                        title: "Stop & Review Trim", options: [.foreground])
         let category = UNNotificationCategory(identifier: Self.checkInCategory,
                                               actions: [keep, stop],
                                               intentIdentifiers: [], options: [])
@@ -56,16 +56,24 @@ final class RecordingNotifier: NSObject {
 
     // MARK: - Posting
 
-    func postCheckIn(elapsed: TimeInterval) {
+    func postCheckIn(elapsed: TimeInterval, silence: TimeInterval? = nil) {
         guard !isRunningTests else { return }
-        let content = UNMutableNotificationContent()
-        content.title = "Still recording?"
-        content.body = "This recording has been running for \(Self.durationText(elapsed)). Keep going?"
-        content.sound = .default
-        content.categoryIdentifier = Self.checkInCategory
-        content.interruptionLevel = .timeSensitive
+        let content = Self.checkInContent(elapsed: elapsed, silence: silence)
         let request = UNNotificationRequest(identifier: Self.checkInRequestID, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request) { _ in }
+    }
+
+    static func checkInContent(elapsed: TimeInterval, silence: TimeInterval? = nil) -> UNMutableNotificationContent {
+        let content = UNMutableNotificationContent()
+        content.title = silence == nil ? "Still recording?" : "No sound captured"
+        content.body = "This recording has been running for \(Self.durationText(elapsed)). Keep going?"
+        if let silence { content.body = "No sound for \(Int(silence / 60)) minutes. Recording will pause at 30 minutes of silence unless you choose to continue." }
+        // A notification tone would be captured as system audio and reset the
+        // silence clock, preventing the unattended 30-minute pause.
+        content.sound = nil
+        content.categoryIdentifier = Self.checkInCategory
+        content.interruptionLevel = .timeSensitive
+        return content
     }
 
     func clearCheckIn() {
@@ -78,7 +86,7 @@ final class RecordingNotifier: NSObject {
     func postAutoStopped(message: String) {
         guard !isRunningTests else { return }
         let content = UNMutableNotificationContent()
-        content.title = "Recording stopped and saved"
+        content.title = "Recording paused"
         content.body = message
         content.sound = .default
         let request = UNNotificationRequest(identifier: Self.autoStopRequestID, content: content, trigger: nil)

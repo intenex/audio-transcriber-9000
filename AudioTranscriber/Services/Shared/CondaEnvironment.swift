@@ -34,6 +34,8 @@ enum CondaEnvironment {
         if let resourcePath = Bundle.main.resourcePath {
             let bundled = (resourcePath as NSString).appendingPathComponent("scripts/\(name)")
             if fm.fileExists(atPath: bundled) { return bundled }
+            let flat = (resourcePath as NSString).appendingPathComponent(name)
+            if fm.fileExists(atPath: flat) { return flat }
         }
 
         // Walk up from the bundle looking for a scripts/ dir (dev builds in DerivedData won't hit this,

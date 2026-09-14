@@ -6,7 +6,7 @@ import Foundation
 /// space.
 ///
 /// The cut point comes from the SAME `SilenceDetector` policy the recorder's
-/// auto-stop uses, so "silence" means one thing in this app, and the bias is
+/// automatic pause uses, so "silence" means one thing in this app, and the bias is
 /// identical: anything that might be audio counts as audio. On top of that the
 /// trim keeps `padding` seconds after the last sound, so even a
 /// misclassification loses nothing audible.

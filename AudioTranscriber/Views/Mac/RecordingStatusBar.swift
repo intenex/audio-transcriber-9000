@@ -19,20 +19,21 @@ struct RecordingStatusBar: View {
                     .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: pulsing)
                     .onAppear { pulsing = true }
 
-                Text("Recording")
+                Text(audioRecorder.isPaused ? "Paused" : "Recording")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(AppTheme.recording)
                 Text(RecordingControlRow.timerText(audioRecorder.recordingDuration))
                     .font(.subheadline.weight(.semibold))
                     .monospacedDigit()
                     .contentTransition(.numericText())
+                    .animation(.easeOut(duration: 0.18), value: audioRecorder.recordingDuration)
                 if !audioRecorder.inputDescription.isEmpty {
                     Text("· \(audioRecorder.inputDescription)")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
-                // Silence guardrail countdown — an auto-stop should never be
+                // Silence guardrail countdown — an automatic pause should never be
                 // the first the user hears of it.
                 if audioRecorder.silenceDuration >= 180 {
                     Label("no sound for \(Int(audioRecorder.silenceDuration / 60)) min",

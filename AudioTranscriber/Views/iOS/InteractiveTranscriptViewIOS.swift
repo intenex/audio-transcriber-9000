@@ -26,7 +26,7 @@ struct InteractiveTranscriptViewIOS: UIViewRepresentable {
         // Touching .layoutManager opts into TextKit 1 — the same geometry
         // model the Mac view uses for hit-testing.
         let textView = UITextView()
-        _ = textView.layoutManager
+        textView.layoutManager.allowsNonContiguousLayout = true
         textView.isEditable = false
         textView.isSelectable = true
         textView.backgroundColor = .clear
@@ -70,6 +70,7 @@ struct InteractiveTranscriptViewIOS: UIViewRepresentable {
 
     class Coordinator: NSObject {
         var wordRanges: [TranscriptWordRange] = []
+        var playbackIndex = TranscriptPlaybackIndex([])
         var highlightedRange: NSRange? = nil
         var searchHighlightedRanges: [NSRange] = []
         var lastSegmentCount: Int = -1
@@ -98,6 +99,7 @@ struct InteractiveTranscriptViewIOS: UIViewRepresentable {
 
             let output = TranscriptTextBuilder.build(segments: segments, speakerNames: speakerNames)
             wordRanges = output.wordRanges
+            playbackIndex = TranscriptPlaybackIndex(output.wordRanges)
             textView.textStorage.setAttributedString(output.text)
             lastSegmentCount = segments.count
             lastSpeakerNames = speakerNames
@@ -141,7 +143,7 @@ struct InteractiveTranscriptViewIOS: UIViewRepresentable {
             guard let textView else { return }
             let storage = textView.textStorage
 
-            let newRange = TranscriptTextBuilder.wordRange(at: time, in: wordRanges)
+            let newRange = playbackIndex.word(at: time)
             guard newRange != highlightedRange else { return }
 
             if let old = highlightedRange, old.location + old.length <= storage.length {

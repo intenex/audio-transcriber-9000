@@ -7,8 +7,7 @@ import XCTest
 /// Both had the same cause (the launch scan blocked the main thread reading
 /// iCloud sidecars, so iOS killed the app at 10 s), and both are invisible to
 /// in-process tests: they need the real app, launched normally, with its real
-/// library. Deliberately read-only — it opens the recording surface and leaves
-/// again without capturing anything into the user's library.
+/// library. Uses five isolated fixtures and never opens the user's library.
 final class RecordFlowUITests: XCTestCase {
 
     override func setUp() {
@@ -17,6 +16,7 @@ final class RecordFlowUITests: XCTestCase {
 
     private func launchedApp() -> XCUIApplication {
         let app = XCUIApplication()
+        app.launchArguments = ["-uiTestSeedLibrary"]
         app.launch()
         return app
     }
@@ -36,22 +36,12 @@ final class RecordFlowUITests: XCTestCase {
         let app = launchedApp()
         XCTAssertTrue(app.navigationBars["Recordings"].waitForExistence(timeout: 20))
 
-        // Rows land as the library scan finishes (and, on a fresh device, as
-        // the metadata sidecars come down from iCloud).
-        let deadline = Date().addingTimeInterval(30)
-        var rows = app.cells.count
-        while rows < 2 && Date() < deadline {
-            Thread.sleep(forTimeInterval: 1)
-            rows = app.cells.count
-        }
-        if rows == 0 {
-            // A genuinely empty library says so; that is not this failure.
-            try XCTSkipIf(app.staticTexts["No Recordings"].exists,
-                          "this device's library is empty — nothing to list")
-        }
-        XCTAssertGreaterThan(rows, 1,
-                             "the library showed \(rows) row(s) — a synced library should list all of them, "
-                             + "and showing exactly one was the reported symptom")
+        // Five small fixtures live in an isolated in-app test directory.
+        // An empty real library or a single valid recording cannot invalidate
+        // this regression test, and no real recordings are opened or changed.
+        let deadline = Date().addingTimeInterval(15)
+        while app.cells.count < 5 && Date() < deadline { Thread.sleep(forTimeInterval: 0.2) }
+        XCTAssertGreaterThanOrEqual(app.cells.count, 5, "the list must expose all five fixture recordings")
     }
 
     func testPressingRecordOpensTheRecordingSurface() {

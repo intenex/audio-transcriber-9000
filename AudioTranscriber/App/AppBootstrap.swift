@@ -18,6 +18,14 @@ enum AppBootstrap {
                      speakerLibrary: SpeakerLibraryStore,
                      liveTranscriber: LiveTranscriber,
                      cloudSync: CloudSyncManager? = nil) {
+        // In-process tests attach their own isolated services and stores.
+        guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
+        if RecordingStore.isUITestFixture {
+            recordingStore.prepareStorageDirectory()
+            Task { await recordingStore.loadAsync() }
+            audioRecorder.attach(store: recordingStore)
+            return
+        }
         LegacySettingsMigrator.runOnce()
         // Promote device-local API keys to iCloud-synchronizable items when
         // signing allows (no-op otherwise; retried each launch).
@@ -53,7 +61,7 @@ enum AppBootstrap {
         // summary + smart auto-naming follow transcription. Optional silent-tail
         // trim runs FIRST (default OFF) so transcription sees the final file.
         recordingStore.onRecordingAdded = { [weak transcriptionService, weak recordingStore] id in
-            let auto = UserDefaults.standard.object(forKey: "autoTranscribeNewRecordings") as? Bool ?? true
+            let auto = UserDefaults.standard.object(forKey: "autoTranscribeNewRecordings") == nil ? true : UserDefaults.standard.bool(forKey: "autoTranscribeNewRecordings")
             let autoTrim = UserDefaults.standard.bool(forKey: "autoTrimTrailingSilence")
             guard autoTrim, let recordingStore else {
                 if auto { transcriptionService?.enqueue(id) }

@@ -1,102 +1,72 @@
 #if os(macOS)
-import AudioToolbox
-import CoreAudio
-import Foundation
+import AVFoundation
+import ScreenCaptureKit
 
-enum SystemAudioCaptureError: LocalizedError {
-    case unsupported
-    case tapCreationFailed(OSStatus)
-    case aggregateCreationFailed(OSStatus)
+/// ScreenCaptureKit supplies the application mix independently of the selected
+/// speaker/headphone device. Only an audio output is registered: screen frames
+/// are neither delivered to this app nor stored in the recording.
+final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
+    private var stream: SCStream?
+    private var writer: ContinuousRecordingWriter?
+    private let queue = DispatchQueue(label: "AudioTranscriber.system-audio", qos: .userInitiated)
+    private let lock = NSLock()
+    private var interrupted = false
+    var needsRecovery: Bool { lock.lock(); defer { lock.unlock() }; return interrupted }
+    static let isSupported = true // Audio capture is available on every supported Mac (14+).
 
-    var errorDescription: String? {
-        switch self {
-        case .unsupported:
-            return "System audio capture requires macOS 14.4 or later."
-        case .tapCreationFailed(let status):
-            return "Couldn't tap system audio (error \(status)). Check System Settings → Privacy & Security → Screen & System Audio Recording."
-        case .aggregateCreationFailed(let status):
-            return "Couldn't combine the microphone with system audio (error \(status))."
-        }
-    }
-}
-
-/// Captures everything the Mac plays (calls, videos, meetings) alongside the
-/// microphone: a global Core Audio process tap is combined with the selected
-/// mic in a private aggregate device, which the recording engine then uses as
-/// its input. Output-device switches (speakers ⇄ AirPods) don't interrupt a
-/// global tap — it captures the system mix regardless of where it's routed.
-///
-/// First use triggers the system-audio recording permission prompt
-/// (NSAudioCaptureUsageDescription). All failures are recoverable: the caller
-/// degrades to mic-only capture.
-final class SystemAudioCapture {
-    private(set) var tapID = AudioObjectID(kAudioObjectUnknown)
-    private(set) var aggregateID = AudioObjectID(kAudioObjectUnknown)
-    private let tapUUID = UUID()
-
-    static var isSupported: Bool {
-        if #available(macOS 14.4, *) { return true }
-        return false
-    }
-
-    /// Creates the global tap + aggregate. Returns the aggregate's device ID,
-    /// ready to be set as an AVAudioEngine input via AUAudioUnit.deviceID.
-    /// The mic is the aggregate's clock master; the tap drift-compensates.
-    func activate(micUID: String) throws -> AudioObjectID {
-        guard #available(macOS 14.4, *) else { throw SystemAudioCaptureError.unsupported }
-
-        let description = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
-        description.uuid = tapUUID
-        description.name = "Audio Transcriber 9000 System Tap"
-        description.isPrivate = true
-        description.muteBehavior = .unmuted
-
-        var newTapID = AudioObjectID(kAudioObjectUnknown)
-        let tapStatus = AudioHardwareCreateProcessTap(description, &newTapID)
-        guard tapStatus == noErr, newTapID != kAudioObjectUnknown else {
-            throw SystemAudioCaptureError.tapCreationFailed(tapStatus)
-        }
-        tapID = newTapID
-
-        let aggregateDescription: [String: Any] = [
-            kAudioAggregateDeviceNameKey: "Audio Transcriber 9000 Capture",
-            kAudioAggregateDeviceUIDKey: "com.audiortranscriber.capture.\(UUID().uuidString)",
-            kAudioAggregateDeviceIsPrivateKey: true,
-            kAudioAggregateDeviceMainSubDeviceKey: micUID,
-            kAudioAggregateDeviceSubDeviceListKey: [
-                [kAudioSubDeviceUIDKey: micUID]
-            ],
-            kAudioAggregateDeviceTapListKey: [
-                [kAudioSubTapUIDKey: tapUUID.uuidString,
-                 kAudioSubTapDriftCompensationKey: true]
-            ],
-            kAudioAggregateDeviceTapAutoStartKey: true,
-        ]
-        var newAggregateID = AudioObjectID(kAudioObjectUnknown)
-        let aggregateStatus = AudioHardwareCreateAggregateDevice(
-            aggregateDescription as CFDictionary, &newAggregateID)
-        guard aggregateStatus == noErr, newAggregateID != kAudioObjectUnknown else {
+    func activate(writer: ContinuousRecordingWriter) async throws {
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
+            try Task.checkCancellation()
+            guard let display = content.displays.first else {
+                throw NSError(domain: "SystemAudioCapture", code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Connect a display to start system audio capture."])
+            }
+            let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
+            let config = SCStreamConfiguration()
+            config.width = 2; config.height = 2
+            config.minimumFrameInterval = CMTime(seconds: 60, preferredTimescale: 1)
+            config.queueDepth = 3; config.showsCursor = false
+            config.capturesAudio = true; config.sampleRate = 48_000; config.channelCount = 2
+            config.excludesCurrentProcessAudio = false
+            let stream = SCStream(filter: filter, configuration: config, delegate: self)
+            self.stream = stream
+            queue.sync { self.writer = writer }
+            try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
+            try await stream.startCapture()
+            try Task.checkCancellation()
+        } catch {
             deactivate()
-            throw SystemAudioCaptureError.aggregateCreationFailed(aggregateStatus)
+            if error is CancellationError { throw error }
+            throw NSError(domain: "SystemAudioCapture", code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "System audio could not start. Enable Audio Transcriber 9000 in System Settings → Privacy & Security → Screen & System Audio Recording, then try again. \(error.localizedDescription)"])
         }
-        aggregateID = newAggregateID
-        return newAggregateID
     }
 
     func deactivate() {
-        guard #available(macOS 14.2, *) else { return }
-        if aggregateID != kAudioObjectUnknown {
-            AudioHardwareDestroyAggregateDevice(aggregateID)
-            aggregateID = AudioObjectID(kAudioObjectUnknown)
-        }
-        if tapID != kAudioObjectUnknown {
-            AudioHardwareDestroyProcessTap(tapID)
-            tapID = AudioObjectID(kAudioObjectUnknown)
-        }
+        let previous = stream; stream = nil
+        queue.sync { self.writer = nil }
+        previous?.stopCapture(completionHandler: { _ in })
     }
 
-    deinit {
-        deactivate()
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        lock.lock(); interrupted = true; lock.unlock()
+    }
+
+    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        guard type == .audio, let writer, sampleBuffer.isValid,
+              let description = sampleBuffer.formatDescription else { return }
+        let format = AVAudioFormat(cmAudioFormatDescription: description)
+        let count = sampleBuffer.numSamples
+        guard count > 0, count <= 65_536,
+              let pcm = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(count)) else { return }
+        pcm.frameLength = AVAudioFrameCount(count)
+        let status = CMSampleBufferCopyPCMDataIntoAudioBufferList(sampleBuffer, at: 0,
+            frameCount: Int32(count), into: pcm.mutableAudioBufferList)
+        guard status == noErr else { return }
+        let seconds = sampleBuffer.presentationTimeStamp.seconds
+        writer.submit(pcm, source: 1,
+                      hostTime: seconds.isFinite && seconds > 0 ? AVAudioTime.hostTime(forSeconds: seconds) : 0)
     }
 }
 #endif

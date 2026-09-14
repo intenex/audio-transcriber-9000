@@ -7,15 +7,14 @@ import Foundation
 /// AVAudioSession itself is thread-safe; callbacks are delivered on main.
 ///
 /// Policy (v1, deliberately conservative):
-/// - Interruption or route loss while RECORDING → finalize-and-save via
-///   `onRecordingInterrupted` (never convert formats mid-tap — historic crash
-///   class; a seamless continuation file is documented future work).
-/// - Interruption while PLAYING → stop playback (AVAudioPlayer state is cheap
+/// - Interruption or route loss while RECORDING → pause and preserve via
+///   `onRecordingInterrupted`; resuming reopens the input and keeps the same CAF.
+/// - Interruption while PLAYING → stop playback (AVPlayer state is cheap
 ///   to re-create; resume-on-end is a refinement).
 final class AudioSessionController {
     static let shared = AudioSessionController()
 
-    /// Recording must end (already-captured audio is finalized + saved).
+    /// Recording must pause (already-captured audio is synchronized and preserved).
     var onRecordingInterrupted: ((String) -> Void)?
     /// Playback should stop.
     var onPlaybackInterrupted: (() -> Void)?
@@ -72,7 +71,7 @@ final class AudioSessionController {
               reason == .oldDeviceUnavailable else { return }
         // The input/output we were using disappeared (headset unplugged, …).
         // A mid-recording route change invalidates the tap format that the
-        // AVAudioFile commonFormat pinning depends on — finalize and save.
+        // input converter depends on — pause before rebuilding on resume.
         if isRecordingSessionActive {
             onRecordingInterrupted?("the microphone in use was disconnected")
         } else {

@@ -354,7 +354,7 @@ final class RecordingStore {
         in storageDirectory: URL, excluding known: Set<String>,
         adoptWithoutSidecars: Bool = false
     ) -> (orphans: [Recording], awaitingSidecars: Int) {
-        let audioExtensions: Set<String> = ["wav", "mp3", "m4a", "aiff", "aac", "flac"]
+        let audioExtensions: Set<String> = ["wav", "mp3", "m4a", "aiff", "aac", "flac", "caf"]
         var awaitingSidecars = 0
         guard let contents = try? FileManager.default.contentsOfDirectory(
             at: storageDirectory, includingPropertiesForKeys: [.creationDateKey], options: [.skipsHiddenFiles]
@@ -465,13 +465,9 @@ final class RecordingStore {
         }
     }
 
-    /// Crash salvage: adopt finalized-but-unmoved recordings left in the spool.
-    /// MUST never touch live capture files — the recorder streams the active
-    /// recording's segments (`<stem>.segN.<ext>`) there, and load() can run
-    /// mid-recording (cloud watcher reloads). Two guards: anything sharing the
-    /// active recording's stem is the recorder's, and anything modified in the
-    /// last 60 s is presumed live (a real crash leftover is stale by the next
-    /// load; a growing capture file's mtime is always fresh).
+    /// Recover unlocked crash CAFs immediately. Active, paused and finalizing
+    /// captures retain their ownership lock. Legacy containers also retain the
+    /// matching-stem and 60-second freshness guards used by older writers.
     nonisolated private static func sweepSpool(storageDirectory: URL,
                                                activeRecordingURL: URL?) {
         guard let contents = try? FileManager.default.contentsOfDirectory(
@@ -482,13 +478,15 @@ final class RecordingStore {
         for url in contents {
             guard url != activeRecordingURL else { continue }
             if let activeStem, url.lastPathComponent.hasPrefix(activeStem) { continue }
+            let recoverableCapture = url.pathExtension.lowercased() == "caf"
+            if recoverableCapture, RecoverablePCMFile.isLocked(url) { continue }
             let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
-            if let modified = values?.contentModificationDate,
+            if !recoverableCapture, let modified = values?.contentModificationDate,
                Date().timeIntervalSince(modified) < 60 {
                 continue
             }
             let size = values?.fileSize ?? 0
-            if size > 4096 {
+            if size > (recoverableCapture ? 68 : 4096) {
                 // An unfinalized container (interrupted stop/merge) carries
                 // audio data but no index — unplayable. Set it aside instead
                 // of showing a 0-second entry in the library.
@@ -618,7 +616,7 @@ final class RecordingStore {
 
     // MARK: - Mutations
 
-    func insert(_ recording: Recording) {
+    func insert(_ recording: Recording, notify: Bool = true) {
         var entry = recording
         if entry.fileSizeBytes == nil {
             entry.fileSizeBytes = Self.fileSize(of: entry.fileURL)
@@ -627,7 +625,7 @@ final class RecordingStore {
         recordings.sort { $0.date > $1.date }
         Self.writeMetaIfChanged(for: entry)
         save()
-        onRecordingAdded?(entry.id)
+        if notify { onRecordingAdded?(entry.id) }
     }
 
     func update(_ id: UUID, _ mutate: (inout Recording) -> Void) {
@@ -1069,5 +1067,66 @@ final class RecordingStore {
         let d = JSONDecoder()
         d.dateDecodingStrategy = .iso8601
         return d
+    }
+}
+
+extension RecordingStore {
+    /// Explicit user-selected cut, only for a fresh recording awaiting review.
+    /// Automatic transcription is deferred until the review sheet is dismissed.
+    func truncateReviewedRecording(_ recording: Recording, keeping seconds: TimeInterval) async -> Bool {
+        guard seconds.isFinite, seconds > 0, seconds < recording.duration,
+              recording.fileURL != activeRecordingURL,
+              !inFlightTranscriptionIDs.contains(recording.id),
+              !trimmingIDs.contains(recording.id),
+              !compressingIDs.contains(recording.id),
+              !mergingIDs.contains(recording.id),
+              self.recording(with: recording.id)?.status == .pending,
+              !FileManager.default.fileExists(atPath: recording.fileURL.deletingPathExtension().appendingPathExtension("segments.json").path)
+        else { errorMessage = "This recording cannot be trimmed while it is being processed."; return false }
+        trimmingIDs.insert(recording.id)
+        defer { trimmingIDs.remove(recording.id) }
+        let destination = SpoolLocation.url(fileName: "review-\(UUID()).\(recording.fileURL.pathExtension)")
+        defer { try? FileManager.default.removeItem(at: destination) }
+        do {
+            try await Task.detached(priority: .userInitiated) {
+                try await TrailingSilenceTrimmer.trim(recording.fileURL, keepingFirst: seconds, to: destination)
+            }.value
+            let duration = Self.audioDuration(for: destination)
+            guard duration > 0, abs(duration - seconds) <= 0.15 else {
+                throw NSError(domain: "Trim", code: 1, userInfo: [NSLocalizedDescriptionKey: "The trimmed duration did not match. Your original is preserved."])
+            }
+            _ = try FileManager.default.replaceItemAt(recording.fileURL, withItemAt: destination)
+            let size = Self.fileSize(of: recording.fileURL)
+            update(recording.id) { $0.duration = duration; $0.fileSizeBytes = size }
+            return true
+        } catch { errorMessage = "Could not trim the recording: \(error.localizedDescription)"; return false }
+    }
+}
+
+
+extension RecordingStore {
+    static var isUITestFixture: Bool {
+        #if DEBUG
+        return ProcessInfo.processInfo.arguments.contains("-uiTestSeedLibrary")
+        #else
+        return false
+        #endif
+    }
+    static func applicationStore() -> RecordingStore {
+        if isUITestFixture {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent("AudioTranscriber-UITestLibrary")
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            for index in 0..<5 {
+                let url = directory.appendingPathComponent("fixture-\(index).caf")
+                if !FileManager.default.fileExists(atPath: url.path),
+                   let file = try? RecoverablePCMFile(url: url, sampleRate: 48_000) {
+                    try? file.append(Array(repeating: 0, count: 4_800)); try? file.close()
+                }
+            }
+            return RecordingStore(storageDirectory: directory, defaults: UserDefaults(suiteName: "AudioTranscriber-UITest")!)
+        }
+        guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil else { return RecordingStore() }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("AudioTranscriber-TestHost-\(ProcessInfo.processInfo.processIdentifier)")
+        return RecordingStore(storageDirectory: directory, defaults: UserDefaults(suiteName: "AudioTranscriber-TestHost")!)
     }
 }

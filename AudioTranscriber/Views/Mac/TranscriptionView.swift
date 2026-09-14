@@ -16,6 +16,8 @@ struct TranscriptionView: View {
     @State private var markdownContent: String? = nil
     @State private var segments: [TranscriptionSegment]? = nil
     @State private var isLoading = false
+    @State private var loadGeneration = UUID()
+    @State private var segmentMatchCount = 0
     @State private var showingDeleteConfirm = false
     @State private var showCopiedToast = false
     @State private var selectedTab: DetailTab = .transcript
@@ -101,6 +103,13 @@ struct TranscriptionView: View {
             editingSpeakerID = nil
             isEditingName = false
             loadMarkdown()
+        }
+        .task(id: transcriptSearchQuery + loadGeneration.uuidString + String(segments?.count ?? 0)) {
+            let query = transcriptSearchQuery
+            let snapshot = segments ?? []
+            let count = await Task.detached { countMatchesInSegments(snapshot, query: query) }.value
+            guard !Task.isCancelled else { return }
+            segmentMatchCount = count
         }
         .onChange(of: recording.status) { _, _ in loadMarkdown() }
         .onChange(of: recording.transcriptionURL) { _, _ in loadMarkdown() }
@@ -416,7 +425,7 @@ struct TranscriptionView: View {
                 TextField("Find in transcript...", text: $transcriptSearchQuery)
                     .textFieldStyle(.plain)
                 if !transcriptSearchQuery.isEmpty {
-                    let count = countMatchesInSegments(segs, query: transcriptSearchQuery)
+                    let count = segmentMatchCount
                     Text("\(count) match\(count == 1 ? "" : "es")")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -583,27 +592,25 @@ struct TranscriptionView: View {
     }
 
     private func loadMarkdown() {
-        guard let url = recording.transcriptionURL else {
-            markdownContent = nil
-            return
-        }
+        let generation = UUID()
+        loadGeneration = generation
+        markdownContent = nil; segments = nil; loadedSummary = nil; speakerNames = [:]
+        guard let url = recording.transcriptionURL else { isLoading = false; return }
         isLoading = true
-        let segmentsURL = recording.fileURL.deletingPathExtension().appendingPathExtension("segments.json")
-        DispatchQueue.global(qos: .userInitiated).async {
-            let content = try? String(contentsOf: url, encoding: .utf8)
-            let segs: [TranscriptionSegment]? = {
-                guard let data = try? Data(contentsOf: segmentsURL) else { return nil }
-                return try? JSONDecoder().decode([TranscriptionSegment].self, from: data)
-            }()
-            DispatchQueue.main.async {
-                markdownContent = content
-                segments = segs
-                isLoading = false
-            }
+        let selected = recording
+        Task { @MainActor in
+            let result = await Task.detached(priority: .userInitiated) {
+                let content = CloudPlaceholder.dataIfDownloaded(url).flatMap { String(data: $0, encoding: .utf8) }
+                let segmentURL = selected.fileURL.deletingPathExtension().appendingPathExtension("segments.json")
+                let segs = CloudPlaceholder.dataIfDownloaded(segmentURL).flatMap { try? JSONDecoder().decode([TranscriptionSegment].self, from: $0) }
+                let names = CloudPlaceholder.dataIfDownloaded(selected.speakersURL).flatMap { try? JSONDecoder().decode([String: String].self, from: $0) } ?? [:]
+                let summary = SummarizationService.loadSummary(for: selected)
+                return (content, segs, names, summary)
+            }.value
+            guard loadGeneration == generation else { return }
+            (markdownContent, segments, speakerNames, loadedSummary) = result
+            isLoading = false
         }
-        // Also load summary and speaker names sidecars
-        loadedSummary = SummarizationService.loadSummary(for: recording)
-        loadSpeakerNames()
     }
 
     private func loadSpeakerNames() {

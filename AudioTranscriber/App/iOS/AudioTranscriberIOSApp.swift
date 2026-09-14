@@ -3,7 +3,7 @@ import SwiftUI
 
 @main
 struct AudioTranscriberIOSApp: App {
-    @State private var recordingStore = RecordingStore()
+    @State private var recordingStore = RecordingStore.applicationStore()
     @State private var audioRecorder = AudioRecorder()
     @State private var transcriptionService = TranscriptionService()
     @State private var chatService = ChatService()

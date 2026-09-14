@@ -5,7 +5,7 @@ import Foundation
 /// Guardrails against recordings that run forever unattended (one ran for
 /// 70 hours once):
 ///
-/// * `SilenceDetector` — stops a recording after a long stretch during which
+/// * `SilenceDetector` — pauses a recording after a long stretch during which
 ///   nothing was captured.
 /// * `LongRecordingCheckIn` — asks "still recording?" at fixed intervals.
 ///
@@ -62,7 +62,7 @@ enum AudioLevel {
 
 // MARK: - Silence detection
 
-/// Decides whether a recording has gone quiet for long enough to stop it.
+/// Decides whether a recording has gone quiet for long enough to pause it.
 ///
 /// A buffer counts as SOUND when any of these hold:
 ///  1. RMS ≥ `alwaysSoundRMSDB` (-45 dBFS) — loud in absolute terms.
@@ -77,8 +77,8 @@ enum AudioLevel {
 /// the point where it would be mistaken for silence.
 struct SilenceDetector {
     struct Config: Equatable {
-        /// Continuous silence that triggers an auto-stop. 0 disables it.
-        var silenceLimit: TimeInterval = 20 * 60
+        /// Continuous silence that triggers an automatic pause. 0 disables it.
+        var silenceLimit: TimeInterval = 30 * 60
         /// Continuous silence after which capture is rebuilt once, in case the
         /// input died while still delivering (empty) buffers. 0 disables it.
         /// Two of the user's real recordings contain 47 min / 113 min of
@@ -97,10 +97,10 @@ struct SilenceDetector {
 
         static let `default` = Config()
 
-        /// Reads the user-tunable limit (`silenceAutoStopMinutes`, 0 = off).
+        /// Reads the user-tunable limit (`silenceAutoPauseMinutes`, 0 = off).
         static func fromDefaults(_ defaults: UserDefaults = .standard) -> Config {
             var config = Config()
-            let minutes = defaults.object(forKey: "silenceAutoStopMinutes") as? Double ?? 20
+            let minutes = defaults.object(forKey: "silenceAutoPauseMinutes") == nil ? 30 : defaults.double(forKey: "silenceAutoPauseMinutes")
             config.silenceLimit = max(0, minutes * 60)
             return config
         }
@@ -188,7 +188,7 @@ struct LongRecordingCheckIn {
 
     /// Reads the user-tunable interval (`longRecordingCheckInHours`, 0 = off).
     static func fromDefaults(_ defaults: UserDefaults = .standard) -> LongRecordingCheckIn {
-        let hours = defaults.object(forKey: "longRecordingCheckInHours") as? Double ?? 2
+        let hours = defaults.object(forKey: "longRecordingCheckInHours") == nil ? 2 : defaults.double(forKey: "longRecordingCheckInHours")
         return LongRecordingCheckIn(interval: max(0, hours * 3600))
     }
 

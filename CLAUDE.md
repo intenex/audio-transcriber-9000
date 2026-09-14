@@ -46,7 +46,7 @@ Keep these docs **current**: any change that alters architecture, invariants, te
 - Bundle ID: `com.audiortranscriber.AudioTranscriber`; process name "Audio Transcriber 9000"
 - Build product: `~/Library/Developer/Xcode/DerivedData/AudioTranscriber9000-*/Build/Products/Debug/Audio Transcriber 9000.app`
 - Test module: `@testable import AudioTranscriber` (PRODUCT_MODULE_NAME override; product name contains spaces)
-- FluidAudio pinned `exactVersion: 0.12.4` in project.yml — re-verify the gotchas in docs/DEVELOPMENT.md on any upgrade; first build after a clean checkout needs network (binary xcframework)
+- FluidAudio pinned `exactVersion: 0.12.6` in project.yml — re-verify the gotchas in docs/DEVELOPMENT.md on any upgrade; first build after a clean checkout needs network (binary xcframework)
 - Transcription is native Swift. conda env `transcriber` is used **only** by the optional local mlx-lm chat provider (`scripts/generate.py`)
 - Mic access needs a manual grant in System Settings → Privacy → Microphone (TCC; ad-hoc signing makes programmatic TCC edits useless)
 - User library: `~/Documents/AudioTranscriber` (configurable) — real recordings up to ~5 h live there and are used by the gated integration tests; treat as user data (read-only unless the flow explicitly writes sidecars)
