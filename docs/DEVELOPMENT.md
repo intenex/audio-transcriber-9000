@@ -81,7 +81,7 @@ The 2026-09-14 update pins FluidAudio 0.12.6: upstream converted AsrManager to a
 - ElevenLabs Scribe is the natural third cloud engine if wanted (follow the engine recipe).
 - **Mac distribution decision (2026-09-14):** the user chose a direct Mac build to preserve arbitrary folders and optional external Python/MLX chat. Do not remove these features or enable the Mac App Sandbox for this release. iOS continues through TestFlight. The Apple Silicon Mac target explicitly uses arm64 (upstream FluidAudio Float16 code does not build for Intel) and bundles `scripts/generate.py` as a resource so local MLX chat does not depend on retaining this repository checkout. The external conda environment remains optional and is discovered as before.
 
-The iOS universal app icon uses `icon_ios_1024.png`: its RGB pixels are identical to the Mac icon, but its alpha channel is removed. Apple rejects even a fully opaque iOS icon when the file contains an alpha channel (upload error 90717). Keep the iOS resource RGB-only.
+The iOS universal app icon uses the full-bleed `icon_ios_1024.png`. The Mac catalog uses separately sized `icon_mac_*.png` variants with a rounded tile and transparent exterior. Apple rejects even a fully opaque iOS icon when the file contains an alpha channel (upload error 90717). Keep the iOS resource RGB-only.
 
 ## Verification isolation
 

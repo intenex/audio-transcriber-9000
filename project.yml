@@ -15,7 +15,7 @@ settings:
     DEVELOPMENT_TEAM: Z6FHNWFTWR
     CODE_SIGN_STYLE: Automatic
     MARKETING_VERSION: "1.1"
-    CURRENT_PROJECT_VERSION: "2"
+    CURRENT_PROJECT_VERSION: "3"
 
 packages:
   FluidAudio:
